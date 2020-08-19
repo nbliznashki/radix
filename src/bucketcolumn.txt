@@ -1,0 +1,29 @@
+
+pub struct BucketColumn {
+    //TO-DO: Implement Drop in parallel
+    //TO-DO: Make data Vec<Vec<usize>> and move worker count
+    data: Vec<usize>,
+    buckets_count: usize,
+}
+
+impl Deref for BucketColumn {
+    type Target = Vec<usize>;
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
+}
+
+impl BucketColumn {
+    pub fn from_hash(hash: &HashColumn, bucket_bits: u32) -> BucketColumn {
+        let buckets_count = 2usize.pow(bucket_bits);
+        assert!((buckets_count as u64) < (u64::MAX) / 2, "Too many buckets");
+        BucketColumn {
+            data: hash
+                .data
+                .par_iter()
+                .map(|h| (h % (2 * buckets_count as u64)) as usize)
+                .collect(),
+            buckets_count,
+        }
+    }
+}
