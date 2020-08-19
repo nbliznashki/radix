@@ -10,7 +10,7 @@ use crate::hashcolumn::*;
 
 pub trait ColumnPartition<V, T> {
     fn get_col(&self) -> &V;
-    fn hash_column<S>(&self, s: &S, index: Option<Vec<Option<usize>>>) -> HashColumn
+    fn hash_column<S>(&self, s: &S, index: ColumnIndex) -> HashColumn
     where
         S: BuildHasher + Sync,
         V: Deref<Target = [T]>,
@@ -78,11 +78,7 @@ pub trait ColumnPartition<V, T> {
         }
     }
 
-    fn partition_column(
-        &self,
-        bmap: &BucketsSizeMap,
-        index: &Option<&Vec<Option<usize>>>,
-    ) -> PartitionedColumn<T>
+    fn partition_column(&self, bmap: &BucketsSizeMap) -> PartitionedColumn<T>
     where
         V: Deref<Target = [T]>,
         V: Sync,
@@ -90,6 +86,7 @@ pub trait ColumnPartition<V, T> {
         T: Clone,
     {
         let column_data = self.get_col();
+        let index = &bmap.hash.index;
 
         let column_len = match index {
             Some(v) => v.len(),
@@ -98,10 +95,10 @@ pub trait ColumnPartition<V, T> {
         //check that the Bucket Size Map and the Column are compatible (needed to allow unsafe code below)
         assert_eq!(column_len, bmap.bucket_column.len());
 
-        let mut output: Vec<(Vec<MaybeUninit<T>>, Option<Vec<Option<usize>>>)> = bmap
+        let mut output: Vec<Vec<MaybeUninit<T>>> = bmap
             .bucket_sizes
             .par_iter()
-            .map(|i| (Vec::with_capacity(*i), None))
+            .map(|i| Vec::with_capacity(*i))
             .collect();
 
         //SAFETY: OK to do, because enough capacity has been reserved, and the content of the vector is assumed to be uninitialized thanks to
@@ -109,10 +106,10 @@ pub trait ColumnPartition<V, T> {
         output
             .par_iter_mut()
             .zip_eq(bmap.bucket_sizes.par_iter())
-            .for_each(|(v, len)| unsafe { v.0.set_len(*len) });
+            .for_each(|(v, len)| unsafe { v.set_len(*len) });
 
         struct UnsafeOutput<T> {
-            data: UnsafeCell<Vec<(Vec<MaybeUninit<T>>, Option<Vec<Option<usize>>>)>>,
+            data: UnsafeCell<Vec<Vec<MaybeUninit<T>>>>,
         }
         //SAFETY: check below
         unsafe impl<T: Sync> Sync for UnsafeOutput<T> {}
@@ -145,7 +142,7 @@ pub trait ColumnPartition<V, T> {
                             //SAFETY - ok to do, due to the way the offset is calculated - no two threads should try to write at the same
                             //offset in the vector, and all fields of the vector should be populated
                             unsafe {
-                                (*unsafe_output)[bucket_id].0[offset[bucket_id]]
+                                (*unsafe_output)[bucket_id][offset[bucket_id]]
                                     .as_mut_ptr()
                                     .write(data[(*index).unwrap()].clone());
                             };
@@ -169,7 +166,7 @@ pub trait ColumnPartition<V, T> {
                             //SAFETY - ok to do, due to the way the offset is calculated - no two threads should try to write at the same
                             //offset in the vector, and all fields of the vector should be populated
                             unsafe {
-                                (*unsafe_output)[bucket_id].0[offset[bucket_id]]
+                                (*unsafe_output)[bucket_id][offset[bucket_id]]
                                     .as_mut_ptr()
                                     .write(data.clone());
                             };
@@ -180,8 +177,7 @@ pub trait ColumnPartition<V, T> {
 
         let output = unsafe_output.data.into_inner();
         //SAFETY - ok to do asall fields of the vector should be populated
-        let output: Vec<(Vec<T>, Option<Vec<Option<usize>>>)> =
-            unsafe { mem::transmute::<_, Vec<(Vec<T>, Option<Vec<Option<usize>>>)>>(output) };
+        let output: Vec<Vec<T>> = unsafe { mem::transmute::<_, Vec<Vec<T>>>(output) };
         PartitionedColumn::FixedLenType(output)
     }
 }
@@ -200,14 +196,11 @@ impl ColumnPartition<Vec<String>, String> for StringVec {
     fn get_col(&self) -> &Vec<String> {
         &self.strvec
     }
-    fn partition_column(
-        &self,
-        bmap: &BucketsSizeMap,
-        index: &Option<&Vec<Option<usize>>>,
-    ) -> PartitionedColumn<String> {
+    fn partition_column(&self, bmap: &BucketsSizeMap) -> PartitionedColumn<String> {
         let column_data = self.get_col();
+        let index = &bmap.hash.index;
 
-        let column_len = match index {
+        let column_len = match &index {
             Some(v) => v.len(),
             None => column_data.len(),
         };
@@ -274,18 +267,13 @@ impl ColumnPartition<Vec<String>, String> for StringVec {
         });
         let data_bucket_sizes = data_offsets.pop().unwrap();
 
-        let mut output: Vec<(MaybeColumnU8, Option<Vec<Option<usize>>>)> = data_bucket_sizes
+        let mut output: Vec<MaybeColumnU8> = data_bucket_sizes
             .par_iter()
             .zip_eq(bmap.bucket_sizes.par_iter())
-            .map(|(i, bsize)| {
-                (
-                    MaybeColumnU8 {
-                        data: Vec::with_capacity(*i),
-                        start_pos: Vec::with_capacity(*bsize),
-                        len: Vec::with_capacity(*bsize),
-                    },
-                    None,
-                )
+            .map(|(i, bsize)| MaybeColumnU8 {
+                data: Vec::with_capacity(*i),
+                start_pos: Vec::with_capacity(*bsize),
+                len: Vec::with_capacity(*bsize),
             })
             .collect();
 
@@ -294,20 +282,20 @@ impl ColumnPartition<Vec<String>, String> for StringVec {
         output
             .par_iter_mut()
             .zip_eq(data_bucket_sizes.par_iter())
-            .for_each(|(v, len)| unsafe { v.0.data.set_len(*len) });
+            .for_each(|(v, len)| unsafe { v.data.set_len(*len) });
 
         output
             .par_iter_mut()
             .zip_eq(bmap.bucket_sizes.par_iter())
-            .for_each(|(v, len)| unsafe { v.0.start_pos.set_len(*len) });
+            .for_each(|(v, len)| unsafe { v.start_pos.set_len(*len) });
 
         output
             .par_iter_mut()
             .zip_eq(bmap.bucket_sizes.par_iter())
-            .for_each(|(v, len)| unsafe { v.0.len.set_len(*len) });
+            .for_each(|(v, len)| unsafe { v.len.set_len(*len) });
 
         struct UnsafeOutput {
-            data: UnsafeCell<Vec<(MaybeColumnU8, Option<Vec<Option<usize>>>)>>,
+            data: UnsafeCell<Vec<MaybeColumnU8>>,
         }
         //SAFETY: check below
         unsafe impl Sync for UnsafeOutput {}
@@ -318,7 +306,7 @@ impl ColumnPartition<Vec<String>, String> for StringVec {
 
         /////--Continue from here
 
-        if let Some(index) = index {
+        if let Some(index) = &index {
             index
                 .par_chunks(chunk_len)
                 .zip_eq(bmap.bucket_column.par_chunks(chunk_len))
@@ -340,7 +328,7 @@ impl ColumnPartition<Vec<String>, String> for StringVec {
                                 let slice_to_write = column_data[(*index).unwrap()].as_bytes();
                                 unsafe {
                                     slice_to_write.iter().enumerate().for_each(|(i, c)| {
-                                        (*unsafe_output)[bucket_id].0.data
+                                        (*unsafe_output)[bucket_id].data
                                             [data_offset[bucket_id] + i]
                                             .as_mut_ptr()
                                             .write(*c);
@@ -348,13 +336,13 @@ impl ColumnPartition<Vec<String>, String> for StringVec {
                                 };
 
                                 unsafe {
-                                    (*unsafe_output)[bucket_id].0.start_pos[offset[bucket_id]]
+                                    (*unsafe_output)[bucket_id].start_pos[offset[bucket_id]]
                                         .as_mut_ptr()
                                         .write(data_offset[bucket_id]);
                                 };
 
                                 unsafe {
-                                    (*unsafe_output)[bucket_id].0.len[offset[bucket_id]]
+                                    (*unsafe_output)[bucket_id].len[offset[bucket_id]]
                                         .as_mut_ptr()
                                         .write(slice_to_write.len());
                                 };
@@ -387,7 +375,7 @@ impl ColumnPartition<Vec<String>, String> for StringVec {
                                 let slice_to_write = data.as_bytes();
                                 unsafe {
                                     slice_to_write.iter().enumerate().for_each(|(i, c)| {
-                                        (*unsafe_output)[bucket_id].0.data
+                                        (*unsafe_output)[bucket_id].data
                                             [data_offset[bucket_id] + i]
                                             .as_mut_ptr()
                                             .write(*c);
@@ -395,13 +383,13 @@ impl ColumnPartition<Vec<String>, String> for StringVec {
                                 };
 
                                 unsafe {
-                                    (*unsafe_output)[bucket_id].0.start_pos[offset[bucket_id]]
+                                    (*unsafe_output)[bucket_id].start_pos[offset[bucket_id]]
                                         .as_mut_ptr()
                                         .write(data_offset[bucket_id]);
                                 };
 
                                 unsafe {
-                                    (*unsafe_output)[bucket_id].0.len[offset[bucket_id]]
+                                    (*unsafe_output)[bucket_id].len[offset[bucket_id]]
                                         .as_mut_ptr()
                                         .write(slice_to_write.len());
                                 };
@@ -414,8 +402,7 @@ impl ColumnPartition<Vec<String>, String> for StringVec {
 
         let output = unsafe_output.data.into_inner();
         //SAFETY - ok to do asall fields of the vector should be populated
-        let output: Vec<(ColumnU8, Option<Vec<Option<usize>>>)> =
-            unsafe { mem::transmute::<_, Vec<(ColumnU8, Option<Vec<Option<usize>>>)>>(output) };
+        let output: Vec<ColumnU8> = unsafe { mem::transmute::<_, Vec<ColumnU8>>(output) };
 
         PartitionedColumn::VariableLenType(output)
     }

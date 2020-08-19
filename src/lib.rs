@@ -128,7 +128,7 @@ mod tests {
             data: vec![1, 2, 4, 6, 8, 10],
             index: None,
         };
-        let b = BucketColumn::from_hash(&hash, 2);
+        let b = BucketColumn::from_hash(hash, 2);
         assert_eq!(*b, vec![1, 2, 4, 6, 0, 2]);
     }
 
@@ -139,7 +139,7 @@ mod tests {
             data: vec![1, 2, 4, 6, 8, 10],
             index: None,
         };
-        let _b = BucketColumn::from_hash(&hash, 63);
+        let _b = BucketColumn::from_hash(hash, 63);
     }
 
     #[test]
@@ -148,7 +148,7 @@ mod tests {
             data: vec![1, 2, 4, 6, 8, 10],
             index: None,
         };
-        let b = BucketColumn::from_hash(&hash, 2);
+        let b = BucketColumn::from_hash(hash, 2);
         assert_eq!(*b, vec![1, 2, 4, 6, 0, 2]);
         let bmap = BucketsSizeMap::from_bucket_column(b, 2);
         assert_eq!(*bmap, vec![vec![0, 1, 1, 0], vec![1, 1, 0, 1]]);
@@ -161,7 +161,7 @@ mod tests {
             data: vec![1, 2, 4, 6, 8, 10],
             index: None,
         };
-        let b = BucketColumn::from_hash(&hash, 2);
+        let b = BucketColumn::from_hash(hash, 2);
         assert_eq!(*b, vec![1, 2, 4, 6, 0, 2]);
         let bmap = BucketsSizeMap::from_bucket_column(b, 1);
         assert_eq!(*bmap, vec![vec![1, 2, 1, 1]]);
@@ -174,7 +174,7 @@ mod tests {
             data: vec![1, 2, 4, 6, 8, 10],
             index: None,
         };
-        let b = BucketColumn::from_hash(&hash, 2);
+        let b = BucketColumn::from_hash(hash, 2);
         assert_eq!(*b, vec![1, 2, 4, 6, 0, 2]);
         let bmap = BucketsSizeMap::from_bucket_column(b, 2);
         assert_eq!(*bmap, vec![vec![0, 1, 1, 0], vec![1, 1, 0, 1]]);
@@ -188,22 +188,18 @@ mod tests {
             data: vec![1, 2, 4, 6, 8, 10],
             index: None,
         };
-        let b = BucketColumn::from_hash(&hash, 2);
+        let data = vec![1, 2, 4, 6, 8, 10];
+        let b = BucketColumn::from_hash(hash, 2);
         assert_eq!(*b, vec![1, 2, 4, 6, 0, 2]);
         let bmap = BucketsSizeMap::from_bucket_column(b, 2);
         assert_eq!(*bmap, vec![vec![0, 1, 1, 0], vec![1, 1, 0, 1]]);
         assert_eq!(bmap.offsets, vec![vec![0, 0, 0, 0], vec![0, 1, 1, 0]]);
         assert_eq!(bmap.bucket_sizes, vec![1, 2, 1, 1]);
 
-        let part = hash.partition_column(&bmap, &None);
+        let part = data.partition_column(&bmap);
         assert_eq!(
             part,
-            PartitionedColumn::FixedLenType(vec![
-                (vec![8], None),
-                (vec![2, 10], None),
-                (vec![4], None),
-                (vec![6], None)
-            ])
+            PartitionedColumn::FixedLenType(vec![vec![8], vec![2, 10], vec![4], vec![6]])
         );
     }
 
@@ -222,48 +218,36 @@ mod tests {
             "fff".to_string(),
         ];
         let strvec = StringVec { strvec };
-        let b = BucketColumn::from_hash(&hash, 2);
+        let b = BucketColumn::from_hash(hash, 2);
         assert_eq!(*b, vec![1, 2, 4, 6, 0, 2]);
         let bmap = BucketsSizeMap::from_bucket_column(b, 2);
         assert_eq!(*bmap, vec![vec![0, 1, 1, 0], vec![1, 1, 0, 1]]);
         assert_eq!(bmap.offsets, vec![vec![0, 0, 0, 0], vec![0, 1, 1, 0]]);
         assert_eq!(bmap.bucket_sizes, vec![1, 2, 1, 1]);
 
-        let part = strvec.partition_column(&bmap, &None);
+        let part = strvec.partition_column(&bmap);
 
         let expected_result = PartitionedColumn::<String>::VariableLenType(vec![
-            (
-                ColumnU8 {
-                    data: vec![101, 101],
-                    start_pos: vec![0],
-                    len: vec![2],
-                },
-                None,
-            ),
-            (
-                ColumnU8 {
-                    data: vec![98, 98, 102, 102, 102],
-                    start_pos: vec![0, 2],
-                    len: vec![2, 3],
-                },
-                None,
-            ),
-            (
-                ColumnU8 {
-                    data: vec![99, 99],
-                    start_pos: vec![0],
-                    len: vec![2],
-                },
-                None,
-            ),
-            (
-                ColumnU8 {
-                    data: vec![100, 100],
-                    start_pos: vec![0],
-                    len: vec![2],
-                },
-                None,
-            ),
+            ColumnU8 {
+                data: vec![101, 101],
+                start_pos: vec![0],
+                len: vec![2],
+            },
+            ColumnU8 {
+                data: vec![98, 98, 102, 102, 102],
+                start_pos: vec![0, 2],
+                len: vec![2, 3],
+            },
+            ColumnU8 {
+                data: vec![99, 99],
+                start_pos: vec![0],
+                len: vec![2],
+            },
+            ColumnU8 {
+                data: vec![100, 100],
+                start_pos: vec![0],
+                len: vec![2],
+            },
         ]);
         assert_eq!(part, expected_result);
     }
@@ -277,47 +261,46 @@ mod tests {
             index: Some(vec![Some(0), Some(1), Some(2), Some(3), Some(4), Some(5)]),
         };
 
-        let b = BucketColumn::from_hash(&hash, 2);
+        let b = BucketColumn::from_hash(hash, 2);
         let bmap = BucketsSizeMap::from_bucket_column(b, 2);
-        let part = data.partition_column(&bmap, &None);
+        let part = data.partition_column(&bmap);
 
         let hash = HashColumn { data, index: None };
 
-        let hash = hash.data.partition_column(&bmap, &None);
+        let hash = hash.data.partition_column(&bmap);
         let hash = if let PartitionedColumn::FixedLenType(hash_inner) = hash {
             hash_inner
         } else {
             panic!()
         };
-        let hash = hash.into_iter().map(|(data, _index)| data).collect();
+        let index = hash.iter().map(|_| None).collect();
+        let hash: HashColumnPartitioned = HashColumnPartitioned { data: hash, index };
 
-        let hash: HashColumnPartitioned = HashColumnPartitioned { data: hash };
+        let b = BucketColumnPartitioned::from_hash(hash, 2);
+        let mut bmap = BucketsSizeMapPartitioned::from_bucket_column(b);
 
-        let b = BucketColumnPartitioned::from_hash(&hash, 2);
-        let bmap = BucketsSizeMapPartitioned::from_bucket_column(b);
-
-        let mut part = if let PartitionedColumn::FixedLenType(part_inner) = part {
-            part_inner
-        } else {
-            panic!()
-        };
-
-        part.iter_mut()
+        let new_index = bmap
+            .bucket_column
+            .iter()
             .enumerate()
-            .filter(|(i, _)| i & 2 == 0)
-            .for_each(|(_, (v, index))| *index = Some((0..v.len()).map(Some).collect()));
+            .map(|(i, v)| {
+                if i & 2 == 0 {
+                    Some((0..v.len()).map(Some).collect())
+                } else {
+                    None
+                }
+            })
+            .collect();
 
-        let part = PartitionedColumn::FixedLenType(part);
+        bmap.hash.index = new_index;
+
+        println!("{:?}", part);
         let part = part.partition_column(&bmap);
+        println!("{:?}", part);
 
         assert_eq!(
             part,
-            PartitionedColumn::FixedLenType(vec![
-                (vec![8], None),
-                (vec![2, 10], None),
-                (vec![4], None),
-                (vec![6], None)
-            ])
+            PartitionedColumn::FixedLenType(vec![vec![8], vec![2, 10], vec![4], vec![6]])
         );
     }
     #[test]
@@ -337,25 +320,25 @@ mod tests {
             index: Some(vec![Some(0), Some(1), Some(2), Some(3), Some(4), Some(5)]),
         };
 
-        let b = BucketColumn::from_hash(&hash, 2);
+        let b = BucketColumn::from_hash(hash, 2);
         let bmap = BucketsSizeMap::from_bucket_column(b, 2);
-        let part = strvec.partition_column(&bmap, &None);
+        let part = strvec.partition_column(&bmap);
 
         let data: Vec<u64> = vec![1, 2, 4, 6, 8, 10];
         let hash = HashColumn { data, index: None };
 
-        let hash = hash.data.partition_column(&bmap, &None);
+        let hash = hash.data.partition_column(&bmap);
         let hash = if let PartitionedColumn::FixedLenType(hash_inner) = hash {
             hash_inner
         } else {
             panic!()
         };
-        let hash = hash.into_iter().map(|(data, _index)| data).collect();
 
-        let hash: HashColumnPartitioned = HashColumnPartitioned { data: hash };
+        let index = hash.iter().map(|_| None).collect();
+        let hash: HashColumnPartitioned = HashColumnPartitioned { data: hash, index };
 
-        let b = BucketColumnPartitioned::from_hash(&hash, 2);
-        let bmap = BucketsSizeMapPartitioned::from_bucket_column(b);
+        let b = BucketColumnPartitioned::from_hash(hash, 2);
+        let mut bmap = BucketsSizeMapPartitioned::from_bucket_column(b);
 
         let mut part = if let PartitionedColumn::VariableLenType(part_inner) = part {
             part_inner
@@ -363,49 +346,46 @@ mod tests {
             panic!()
         };
 
-        part.iter_mut()
+        let new_index = bmap
+            .bucket_column
+            .iter()
             .enumerate()
-            .filter(|(i, _)| i & 2 == 0)
-            .for_each(|(_, (v, index))| *index = Some((0..v.start_pos.len()).map(Some).collect()));
+            .map(|(i, v)| {
+                if i & 2 == 0 {
+                    Some((0..v.len()).map(Some).collect())
+                } else {
+                    None
+                }
+            })
+            .collect();
 
+        bmap.hash.index = new_index;
         let part = PartitionedColumn::VariableLenType(part);
 
         println!("{:?}", part);
         let part = part.partition_column(&bmap);
         println!("{:?}", part);
         let expected_result = PartitionedColumn::<String>::VariableLenType(vec![
-            (
-                ColumnU8 {
-                    data: vec![101, 101],
-                    start_pos: vec![0],
-                    len: vec![2],
-                },
-                None,
-            ),
-            (
-                ColumnU8 {
-                    data: vec![98, 98, 102, 102, 102],
-                    start_pos: vec![0, 2],
-                    len: vec![2, 3],
-                },
-                None,
-            ),
-            (
-                ColumnU8 {
-                    data: vec![99, 99],
-                    start_pos: vec![0],
-                    len: vec![2],
-                },
-                None,
-            ),
-            (
-                ColumnU8 {
-                    data: vec![100, 100],
-                    start_pos: vec![0],
-                    len: vec![2],
-                },
-                None,
-            ),
+            ColumnU8 {
+                data: vec![101, 101],
+                start_pos: vec![0],
+                len: vec![2],
+            },
+            ColumnU8 {
+                data: vec![98, 98, 102, 102, 102],
+                start_pos: vec![0, 2],
+                len: vec![2, 3],
+            },
+            ColumnU8 {
+                data: vec![99, 99],
+                start_pos: vec![0],
+                len: vec![2],
+            },
+            ColumnU8 {
+                data: vec![100, 100],
+                start_pos: vec![0],
+                len: vec![2],
+            },
         ]);
         assert_eq!(part, expected_result);
     }
