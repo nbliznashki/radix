@@ -15,10 +15,14 @@ pub(crate) struct MaybeColumnU8 {
 
 #[derive(Debug, PartialEq)]
 pub enum PartitionedColumn<T> {
-    FixedLenType(Vec<(Vec<T>, Option<Vec<Option<usize>>>)>),
-    VariableLenType(Vec<(ColumnU8, Option<Vec<Option<usize>>>)>),
+    FixedLenType(Vec<Vec<T>>),
+    VariableLenType(Vec<ColumnU8>),
 }
 
 pub struct StringVec {
     pub strvec: Vec<String>,
 }
+
+pub type ColumnIndex = Option<Vec<Option<usize>>>;
+
+pub type ColumnIndexPartitioned = Vec<ColumnIndex>;

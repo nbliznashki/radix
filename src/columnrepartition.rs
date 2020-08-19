@@ -7,7 +7,7 @@ use std::hash::{BuildHasher, Hash, Hasher};
 use std::mem::{self, MaybeUninit};
 
 pub trait ColumnRePartition<T> {
-    fn hash_column<S>(&self, s: &S) -> HashColumnPartitioned
+    fn hash_column<S>(&self, s: &S, index: ColumnIndexPartitioned) -> HashColumnPartitioned
     where
         S: BuildHasher + Sync,
         T: Send + Sync,
@@ -24,7 +24,7 @@ pub trait ColumnRePartition<T> {
 }
 
 impl<T> ColumnRePartition<T> for PartitionedColumn<T> {
-    fn hash_column<S>(&self, s: &S) -> HashColumnPartitioned
+    fn hash_column<S>(&self, s: &S, index: ColumnIndexPartitioned) -> HashColumnPartitioned
     where
         S: BuildHasher + Sync,
         T: Send + Sync,
@@ -34,8 +34,9 @@ impl<T> ColumnRePartition<T> for PartitionedColumn<T> {
             PartitionedColumn::FixedLenType(column_data) => HashColumnPartitioned {
                 data: column_data
                     .par_iter()
-                    .map(|column_data_part| {
-                        if let Some(index) = &column_data_part.1 {
+                    .zip_eq(index.par_iter())
+                    .map(|(column_data_part, index_part)| {
+                        if let Some(index) = &index_part {
                             index
                                 .iter()
                                 .map(|i| match i {
@@ -59,13 +60,15 @@ impl<T> ColumnRePartition<T> for PartitionedColumn<T> {
                         }
                     })
                     .collect(),
+                index,
             },
             PartitionedColumn::VariableLenType(columnu8_data) => HashColumnPartitioned {
                 data: columnu8_data
                     .par_iter()
-                    .map(|column_data_part| {
-                        if let Some(index) = &column_data_part.1 {
-                            let columnu8 = &column_data_part.0;
+                    .zip_eq(index.par_iter())
+                    .map(|(column_data_part, index_part)| {
+                        if let Some(index) = &index_part {
+                            let columnu8 = &column_data_part;
                             index
                                 .iter()
                                 .map(|i| match i {
@@ -83,7 +86,7 @@ impl<T> ColumnRePartition<T> for PartitionedColumn<T> {
                                 })
                                 .collect()
                         } else {
-                            let columnu8 = &column_data_part.0;
+                            let columnu8 = &column_data_part;
                             columnu8
                                 .start_pos
                                 .iter()
@@ -100,6 +103,7 @@ impl<T> ColumnRePartition<T> for PartitionedColumn<T> {
                         }
                     })
                     .collect(),
+                index,
             },
         }
     }
@@ -110,13 +114,15 @@ impl<T> ColumnRePartition<T> for PartitionedColumn<T> {
         T: Send + Sync,
         T: Hash,
     {
+        let index = &h.index;
         match &self {
             PartitionedColumn::FixedLenType(column_data) => {
                 column_data
                     .par_iter()
+                    .zip_eq(index.par_iter())
                     .zip_eq(h.data.par_iter_mut())
-                    .for_each(|(column_data_part, h)| {
-                        if let Some(index) = &column_data_part.1 {
+                    .for_each(|((column_data_part, index_part), h)| {
+                        if let Some(index) = &index_part {
                             h.par_iter_mut()
                                 .zip_eq(index.par_iter())
                                 .filter(|(current_hash, _)| **current_hash & 1 == 0)
@@ -143,10 +149,11 @@ impl<T> ColumnRePartition<T> for PartitionedColumn<T> {
             PartitionedColumn::VariableLenType(columnu8_data) => {
                 columnu8_data
                     .par_iter()
+                    .zip_eq(index.par_iter())
                     .zip_eq(h.data.par_iter_mut())
-                    .for_each(|(column_data_part, h)| {
-                        if let Some(index) = &column_data_part.1 {
-                            let columnu8 = &column_data_part.0;
+                    .for_each(|((column_data_part, index_part), h)| {
+                        if let Some(index) = &index_part {
+                            let columnu8 = &column_data_part;
                             h.par_iter_mut()
                                 .zip_eq(index.par_iter())
                                 .filter(|(current_hash, _)| **current_hash & 1 == 0)
@@ -164,7 +171,7 @@ impl<T> ColumnRePartition<T> for PartitionedColumn<T> {
                                     }
                                 });
                         } else {
-                            let columnu8 = &column_data_part.0;
+                            let columnu8 = &column_data_part;
                             h.par_iter_mut()
                                 .zip_eq(columnu8.start_pos.par_iter())
                                 .zip_eq(columnu8.len.par_iter())
@@ -188,23 +195,25 @@ impl<T> ColumnRePartition<T> for PartitionedColumn<T> {
         T: Send + Sync,
         T: Clone,
     {
+        let index = &bmap.hash.index;
         match &self {
             PartitionedColumn::FixedLenType(column_data) => {
                 column_data
                     .par_iter()
+                    .zip_eq(index.par_iter())
                     .zip_eq(bmap.bucket_column.par_iter())
-                    .for_each(|(data, bc)| {
-                        let column_len = match &data.1 {
+                    .for_each(|((data, index), bc)| {
+                        let column_len = match index {
                             Some(v) => v.len(),
-                            None => data.0.len(),
+                            None => data.len(),
                         };
                         //check that the Bucket Size Map and the Column are compatible (needed to allow unsafe code below)
                         assert_eq!(column_len, bc.len());
                     });
-                let mut output: Vec<(Vec<MaybeUninit<T>>, Option<Vec<Option<usize>>>)> = bmap
+                let mut output: Vec<Vec<MaybeUninit<T>>> = bmap
                     .bucket_sizes
                     .par_iter()
-                    .map(|i| (Vec::with_capacity(*i), None))
+                    .map(|i| Vec::with_capacity(*i))
                     .collect();
 
                 //SAFETY: OK to do, because enough capacity has been reserved, and the content of the vector is assumed to be uninitialized thanks to
@@ -212,10 +221,10 @@ impl<T> ColumnRePartition<T> for PartitionedColumn<T> {
                 output
                     .par_iter_mut()
                     .zip_eq(bmap.bucket_sizes.par_iter())
-                    .for_each(|(v, len)| unsafe { v.0.set_len(*len) });
+                    .for_each(|(v, len)| unsafe { v.set_len(*len) });
 
                 struct UnsafeOutput<T> {
-                    data: UnsafeCell<Vec<(Vec<MaybeUninit<T>>, Option<Vec<Option<usize>>>)>>,
+                    data: UnsafeCell<Vec<Vec<MaybeUninit<T>>>>,
                 }
                 //SAFETY: check below
                 unsafe impl<T: Sync> Sync for UnsafeOutput<T> {}
@@ -228,6 +237,7 @@ impl<T> ColumnRePartition<T> for PartitionedColumn<T> {
 
                 column_data
                     .par_iter()
+                    .zip_eq(index.par_iter())
                     .zip_eq(bmap.bucket_column.par_iter())
                     .zip_eq(bmap.offsets.par_iter())
                     .for_each(
@@ -243,7 +253,7 @@ impl<T> ColumnRePartition<T> for PartitionedColumn<T> {
                                     .map(|(bucket_id, index)| (bucket_id >> 1, index))
                                     .for_each(|(bucket_id, index)| {
                                         unsafe {
-                                            (*unsafe_output)[bucket_id].0[offset[bucket_id]]
+                                            (*unsafe_output)[bucket_id][offset[bucket_id]]
                                                 .as_mut_ptr()
                                                 .write(data_chunk[(*index).unwrap()].clone());
                                         };
@@ -257,7 +267,7 @@ impl<T> ColumnRePartition<T> for PartitionedColumn<T> {
                                     .map(|(bucket_id, data)| (bucket_id >> 1, data))
                                     .for_each(|(bucket_id, data)| {
                                         unsafe {
-                                            (*unsafe_output)[bucket_id].0[offset[bucket_id]]
+                                            (*unsafe_output)[bucket_id][offset[bucket_id]]
                                                 .as_mut_ptr()
                                                 .write(data.clone());
                                         };
@@ -269,19 +279,18 @@ impl<T> ColumnRePartition<T> for PartitionedColumn<T> {
 
                 let output = unsafe_output.data.into_inner();
                 //SAFETY - ok to do asall fields of the vector should be populated
-                let output: Vec<(Vec<T>, Option<Vec<Option<usize>>>)> = unsafe {
-                    mem::transmute::<_, Vec<(Vec<T>, Option<Vec<Option<usize>>>)>>(output)
-                };
+                let output: Vec<Vec<T>> = unsafe { mem::transmute::<_, Vec<Vec<T>>>(output) };
                 PartitionedColumn::FixedLenType(output)
             }
             PartitionedColumn::VariableLenType(columnu8_data) => {
                 columnu8_data
                     .par_iter()
+                    .zip_eq(index.par_iter())
                     .zip_eq(bmap.bucket_column.par_iter())
-                    .for_each(|(data, bc)| {
-                        let column_len = match &data.1 {
+                    .for_each(|((data, index), bc)| {
+                        let column_len = match index {
                             Some(v) => v.len(),
-                            None => data.0.start_pos.len(),
+                            None => data.start_pos.len(),
                         };
                         //check that the Bucket Size Map and the Column are compatible (needed to allow unsafe code below)
                         assert_eq!(column_len, bc.len());
@@ -290,22 +299,21 @@ impl<T> ColumnRePartition<T> for PartitionedColumn<T> {
                 let buckets_count = bmap.buckets_count;
                 let data_bmap: Vec<Vec<usize>> = columnu8_data
                     .par_iter()
+                    .zip_eq(index.par_iter())
                     .zip_eq(bmap.bucket_column.par_iter())
-                    .map(|(columnu8_data_part, bucket_chunk)| {
+                    .map(|((columnu8_data_part, index_part), bucket_chunk)| {
                         let mut local_map: Vec<usize> = vec![0; buckets_count];
-                        if let Some(index) = &columnu8_data_part.1 {
+                        if let Some(index) = &index_part {
                             index
                                 .iter()
                                 .zip(bucket_chunk.iter())
                                 .filter(|(_index, bucket_id)| *bucket_id & 1 == 0)
                                 .map(|(index, bucket_id)| (index, bucket_id >> 1))
                                 .for_each(|(index, bucket_id)| {
-                                    local_map[bucket_id] +=
-                                        columnu8_data_part.0.len[index.unwrap()];
+                                    local_map[bucket_id] += columnu8_data_part.len[index.unwrap()];
                                 });
                         } else {
                             columnu8_data_part
-                                .0
                                 .len
                                 .iter()
                                 .zip(bucket_chunk.iter())
@@ -339,41 +347,35 @@ impl<T> ColumnRePartition<T> for PartitionedColumn<T> {
                 });
                 let data_bucket_sizes = data_offsets.pop().unwrap();
 
-                let mut output: Vec<(MaybeColumnU8, Option<Vec<Option<usize>>>)> =
-                    data_bucket_sizes
-                        .par_iter()
-                        .zip_eq(bmap.bucket_sizes.par_iter())
-                        .map(|(i, bsize)| {
-                            (
-                                MaybeColumnU8 {
-                                    data: Vec::with_capacity(*i),
-                                    start_pos: Vec::with_capacity(*bsize),
-                                    len: Vec::with_capacity(*bsize),
-                                },
-                                None,
-                            )
-                        })
-                        .collect();
+                let mut output: Vec<MaybeColumnU8> = data_bucket_sizes
+                    .par_iter()
+                    .zip_eq(bmap.bucket_sizes.par_iter())
+                    .map(|(i, bsize)| MaybeColumnU8 {
+                        data: Vec::with_capacity(*i),
+                        start_pos: Vec::with_capacity(*bsize),
+                        len: Vec::with_capacity(*bsize),
+                    })
+                    .collect();
 
                 //SAFETY: OK to do, because enough capacity has been reserved, and the content of the vector is assumed to be uninitialized thanks to
                 //definition using MaybeUninit
                 output
                     .par_iter_mut()
                     .zip_eq(data_bucket_sizes.par_iter())
-                    .for_each(|(v, len)| unsafe { v.0.data.set_len(*len) });
+                    .for_each(|(v, len)| unsafe { v.data.set_len(*len) });
 
                 output
                     .par_iter_mut()
                     .zip_eq(bmap.bucket_sizes.par_iter())
-                    .for_each(|(v, len)| unsafe { v.0.start_pos.set_len(*len) });
+                    .for_each(|(v, len)| unsafe { v.start_pos.set_len(*len) });
 
                 output
                     .par_iter_mut()
                     .zip_eq(bmap.bucket_sizes.par_iter())
-                    .for_each(|(v, len)| unsafe { v.0.len.set_len(*len) });
+                    .for_each(|(v, len)| unsafe { v.len.set_len(*len) });
 
                 struct UnsafeOutput {
-                    data: UnsafeCell<Vec<(MaybeColumnU8, Option<Vec<Option<usize>>>)>>,
+                    data: UnsafeCell<Vec<MaybeColumnU8>>,
                 }
                 //SAFETY: check below
                 unsafe impl Sync for UnsafeOutput {}
@@ -386,19 +388,20 @@ impl<T> ColumnRePartition<T> for PartitionedColumn<T> {
 
                 columnu8_data
                     .par_iter()
+                    .zip_eq(index.par_iter())
                     .zip_eq(bmap.bucket_column.par_iter())
                     .zip_eq(data_offsets.par_iter())
                     .zip_eq(bmap.offsets.par_iter())
                     .for_each(
                         |(
-                            ((columnu8_data_part, bucket_chunk), initial_data_offset),
+                            (((columnu8_data_part, index_part), bucket_chunk), initial_data_offset),
                             initial_offset,
                         )| {
                             let mut data_offset = initial_data_offset.clone();
                             let mut offset = initial_offset.clone();
                             let unsafe_output = unsafe_output.data.get();
-                            if let Some(index) = &columnu8_data_part.1 {
-                                let columnu8 = &columnu8_data_part.0;
+                            if let Some(index) = &index_part {
+                                let columnu8 = &columnu8_data_part;
                                 bucket_chunk
                                     .iter()
                                     .zip(index.iter())
@@ -415,7 +418,7 @@ impl<T> ColumnRePartition<T> for PartitionedColumn<T> {
                                         let slice_to_write = &slice_u8[start_pos..end_pos];
                                         unsafe {
                                             slice_to_write.iter().enumerate().for_each(|(i, c)| {
-                                                (*unsafe_output)[bucket_id].0.data
+                                                (*unsafe_output)[bucket_id].data
                                                     [data_offset[bucket_id] + i]
                                                     .as_mut_ptr()
                                                     .write(*c);
@@ -423,14 +426,14 @@ impl<T> ColumnRePartition<T> for PartitionedColumn<T> {
                                         };
 
                                         unsafe {
-                                            (*unsafe_output)[bucket_id].0.start_pos
+                                            (*unsafe_output)[bucket_id].start_pos
                                                 [offset[bucket_id]]
                                                 .as_mut_ptr()
                                                 .write(data_offset[bucket_id]);
                                         };
 
                                         unsafe {
-                                            (*unsafe_output)[bucket_id].0.len[offset[bucket_id]]
+                                            (*unsafe_output)[bucket_id].len[offset[bucket_id]]
                                                 .as_mut_ptr()
                                                 .write(slice_to_write.len());
                                         };
@@ -439,7 +442,7 @@ impl<T> ColumnRePartition<T> for PartitionedColumn<T> {
                                         offset[bucket_id] += 1;
                                     })
                             } else {
-                                let columnu8 = &columnu8_data_part.0;
+                                let columnu8 = &columnu8_data_part;
                                 bucket_chunk
                                     .iter()
                                     .zip(columnu8.start_pos.iter())
@@ -456,7 +459,7 @@ impl<T> ColumnRePartition<T> for PartitionedColumn<T> {
                                         let slice_to_write = &slice_u8[*start_pos..end_pos];
                                         unsafe {
                                             slice_to_write.iter().enumerate().for_each(|(i, c)| {
-                                                (*unsafe_output)[bucket_id].0.data
+                                                (*unsafe_output)[bucket_id].data
                                                     [data_offset[bucket_id] + i]
                                                     .as_mut_ptr()
                                                     .write(*c);
@@ -464,14 +467,14 @@ impl<T> ColumnRePartition<T> for PartitionedColumn<T> {
                                         };
 
                                         unsafe {
-                                            (*unsafe_output)[bucket_id].0.start_pos
+                                            (*unsafe_output)[bucket_id].start_pos
                                                 [offset[bucket_id]]
                                                 .as_mut_ptr()
                                                 .write(data_offset[bucket_id]);
                                         };
 
                                         unsafe {
-                                            (*unsafe_output)[bucket_id].0.len[offset[bucket_id]]
+                                            (*unsafe_output)[bucket_id].len[offset[bucket_id]]
                                                 .as_mut_ptr()
                                                 .write(slice_to_write.len());
                                         };
@@ -484,9 +487,7 @@ impl<T> ColumnRePartition<T> for PartitionedColumn<T> {
 
                 let output = unsafe_output.data.into_inner();
                 //SAFETY - ok to do asall fields of the vector should be populated
-                let output: Vec<(ColumnU8, Option<Vec<Option<usize>>>)> = unsafe {
-                    mem::transmute::<_, Vec<(ColumnU8, Option<Vec<Option<usize>>>)>>(output)
-                };
+                let output: Vec<ColumnU8> = unsafe { mem::transmute::<_, Vec<ColumnU8>>(output) };
 
                 PartitionedColumn::VariableLenType(output)
             }

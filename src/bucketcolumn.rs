@@ -8,6 +8,7 @@ pub struct BucketColumn {
     //TO-DO: Make data Vec<Vec<usize>> and move worker count
     pub(crate) data: Vec<usize>,
     pub(crate) buckets_count: usize,
+    pub(crate) hash: HashColumn,
 }
 
 impl Deref for BucketColumn {
@@ -18,7 +19,7 @@ impl Deref for BucketColumn {
 }
 
 impl BucketColumn {
-    pub fn from_hash(hash: &HashColumn, bucket_bits: u32) -> BucketColumn {
+    pub fn from_hash(hash: HashColumn, bucket_bits: u32) -> BucketColumn {
         let buckets_count = 2usize.pow(bucket_bits);
         assert!((buckets_count as u64) < (u64::MAX) / 2, "Too many buckets");
         BucketColumn {
@@ -28,6 +29,7 @@ impl BucketColumn {
                 .map(|h| (h % (2 * buckets_count as u64)) as usize)
                 .collect(),
             buckets_count,
+            hash,
         }
     }
 }
@@ -37,6 +39,7 @@ pub struct BucketColumnPartitioned {
     //TO-DO: Make data Vec<Vec<usize>> and move worker count
     pub(crate) data: Vec<Vec<usize>>, //buckets_count
     pub(crate) buckets_count: usize,
+    pub(crate) hash: HashColumnPartitioned,
 }
 
 impl Deref for BucketColumnPartitioned {
@@ -47,7 +50,7 @@ impl Deref for BucketColumnPartitioned {
 }
 
 impl BucketColumnPartitioned {
-    pub fn from_hash(hash: &HashColumnPartitioned, bucket_bits: u32) -> BucketColumnPartitioned {
+    pub fn from_hash(hash: HashColumnPartitioned, bucket_bits: u32) -> BucketColumnPartitioned {
         let buckets_count = 2usize.pow(bucket_bits);
         assert!((buckets_count as u64) < (u64::MAX) / 2, "Too many buckets");
         BucketColumnPartitioned {
@@ -61,6 +64,7 @@ impl BucketColumnPartitioned {
                 })
                 .collect(),
             buckets_count,
+            hash,
         }
     }
 }
@@ -74,6 +78,7 @@ pub struct BucketsSizeMap {
     pub(crate) bucket_column: Vec<usize>,
     pub(crate) offsets: Vec<Vec<usize>>,
     pub(crate) bucket_sizes: Vec<usize>,
+    pub(crate) hash: HashColumn,
 }
 
 impl Deref for BucketsSizeMap {
@@ -122,6 +127,7 @@ impl BucketsSizeMap {
             bucket_column: bc.data,
             offsets,
             bucket_sizes,
+            hash: bc.hash,
         }
     }
 }
@@ -135,6 +141,7 @@ pub struct BucketsSizeMapPartitioned {
     pub(crate) buckets_count: usize,
     pub(crate) offsets: Vec<Vec<usize>>,
     pub(crate) bucket_sizes: Vec<usize>,
+    pub(crate) hash: HashColumnPartitioned,
 }
 
 impl Deref for BucketsSizeMapPartitioned {
@@ -182,6 +189,7 @@ impl BucketsSizeMapPartitioned {
             buckets_count: bc.buckets_count,
             offsets,
             bucket_sizes,
+            hash: bc.hash,
         }
     }
 }
