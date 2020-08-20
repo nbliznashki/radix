@@ -42,7 +42,7 @@ impl<T> ColumnRePartition<T> for PartitionedColumn<T> {
                                 .map(|i| match i {
                                     Some(i) => {
                                         let mut h = s.build_hasher();
-                                        column_data[*i].hash(&mut h);
+                                        column_data_part[*i].hash(&mut h);
                                         h.finish() << 1
                                     }
                                     None => 1,
@@ -130,13 +130,13 @@ impl<T> ColumnRePartition<T> for PartitionedColumn<T> {
                                     None => *current_hash = 1,
                                     Some(i) => {
                                         let mut h = s.build_hasher();
-                                        column_data[*i].hash(&mut h);
+                                        column_data_part[*i].hash(&mut h);
                                         *current_hash = current_hash.wrapping_add(h.finish() << 1);
                                     }
                                 });
                         } else {
                             h.par_iter_mut()
-                                .zip_eq(column_data.par_iter())
+                                .zip_eq(column_data_part.par_iter())
                                 .filter(|(current_hash, _)| **current_hash & 1 == 0)
                                 .for_each(|(current_hash, t)| {
                                     let mut h = s.build_hasher();
