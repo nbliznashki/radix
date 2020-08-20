@@ -1,9 +1,11 @@
 mod bucketcolumn;
+mod columnflatten;
 mod columnpartition;
 mod columnrepartition;
 mod columnu8;
 mod hashcolumn;
 
+pub use columnflatten::*;
 pub use columnpartition::*;
 pub use columnrepartition::*;
 
@@ -388,5 +390,119 @@ mod tests {
             },
         ]);
         assert_eq!(part, expected_result);
+    }
+
+    #[test]
+    fn index_flatten() {
+        let strvec: Vec<String> = vec![
+            "aa".to_string(),
+            "bb".to_string(),
+            "cc".to_string(),
+            "dd".to_string(),
+            "ee".to_string(),
+            "fff".to_string(),
+        ];
+        let strvec = StringVec { strvec };
+
+        let hash: HashColumn = HashColumn {
+            data: vec![8, 2, 2, 2, 2, 6],
+            index: Some(vec![Some(0), Some(1), Some(2), Some(3), Some(4), Some(5)]),
+        };
+
+        let b = BucketColumn::from_hash(hash, 2);
+        let bmap = BucketsSizeMap::from_bucket_column(b, 2);
+
+        //This gives column with elements per chunk 1 4 0 1
+        let part = strvec.partition_column(&bmap);
+
+        let index = vec![
+            None,
+            Some(vec![Some(0), Some(0)]),
+            None,
+            Some(vec![Some(0)]),
+        ];
+
+        let flattened_index = part.flatten_index(&index);
+
+        assert_eq!(
+            flattened_index.index_flattened,
+            Some(vec![Some(0), Some(1), Some(1), Some(2)]),
+        );
+    }
+
+    #[test]
+    fn column_flatten_fixedlen() {
+        let data: Vec<u64> = vec![1, 2, 3, 4, 5, 6];
+
+        let hash: HashColumn = HashColumn {
+            data: vec![8, 2, 2, 2, 2, 6],
+            index: Some(vec![Some(0), Some(1), Some(2), Some(3), Some(4), Some(5)]),
+        };
+
+        let b = BucketColumn::from_hash(hash, 2);
+        let bmap = BucketsSizeMap::from_bucket_column(b, 2);
+
+        //This gives column with elements per chunk 1 4 0 1
+        let part = data.partition_column(&bmap);
+
+        let index = vec![
+            None,
+            Some(vec![Some(0), Some(0)]),
+            None,
+            Some(vec![Some(0)]),
+        ];
+
+        let flattened_index = part.flatten_index(&index);
+
+        let flattened_column = part.flatten(&flattened_index);
+
+        assert_eq!(
+            flattened_column,
+            FlattenedColumn::FixedLenType(vec![1, 2, 6])
+        );
+    }
+
+    #[test]
+    fn column_flatten_variable() {
+        let strvec: Vec<String> = vec![
+            "aa".to_string(),
+            "bbb".to_string(),
+            "cc".to_string(),
+            "dd".to_string(),
+            "ee".to_string(),
+            "ff".to_string(),
+        ];
+        let strvec = StringVec { strvec };
+
+        let hash: HashColumn = HashColumn {
+            data: vec![8, 2, 2, 2, 2, 6],
+            index: Some(vec![Some(0), Some(1), Some(2), Some(3), Some(4), Some(5)]),
+        };
+
+        let b = BucketColumn::from_hash(hash, 2);
+        let bmap = BucketsSizeMap::from_bucket_column(b, 2);
+
+        //This gives column with elements per chunk 1 4 0 1
+        let part = strvec.partition_column(&bmap);
+
+        let index = vec![
+            None,
+            Some(vec![Some(0), Some(0)]),
+            None,
+            Some(vec![Some(0)]),
+        ];
+
+        let flattened_index = part.flatten_index(&index);
+
+        let flattened_column = part.flatten(&flattened_index);
+
+        assert_eq!(
+            flattened_column,
+            FlattenedColumn::VariableLenTypeU8(ColumnU8 {
+                data: vec![97, 97, 98, 98, 98, 102, 102],
+                start_pos: vec![0, 2, 5],
+                len: vec![2, 3, 2]
+            })
+        )
     }
 }
