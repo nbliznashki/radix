@@ -405,7 +405,7 @@ impl<T> ColumnFlatten<T> for PartitionedColumn<T> {
                     );
 
                 let flattened_start_pos = unsafe_flattened_start_pos.data.into_inner();
-                //SAFETY - ok to do asall fields of the vector should be populated
+                //SAFETY - ok to do as all fields of the vector should be populated
                 let flattened_start_pos: Vec<usize> =
                     unsafe { mem::transmute::<_, Vec<usize>>(flattened_start_pos) };
 
@@ -417,8 +417,7 @@ impl<T> ColumnFlatten<T> for PartitionedColumn<T> {
                 let total_len: usize = flattened_start_pos.iter().rev().take(1).sum::<usize>()
                     + flattened_len.iter().rev().take(1).sum::<usize>();
 
-                let mut flattened_data: Vec<MaybeUninit<u8>> =
-                    Vec::with_capacity(indexmap.target_total_len);
+                let mut flattened_data: Vec<MaybeUninit<u8>> = Vec::with_capacity(total_len);
 
                 unsafe { flattened_data.set_len(total_len) };
 
@@ -450,12 +449,11 @@ impl<T> ColumnFlatten<T> for PartitionedColumn<T> {
                                 });
                             });
                         } else {
-                            let target_write_pos = flattened_start_pos[*target_write_offset];
                             let slice_to_write = data_chunk.data.as_slice();
 
                             slice_to_write.iter().enumerate().for_each(|(i, d)| {
                                 unsafe {
-                                    (*unsafe_output)[i + target_write_pos]
+                                    (*unsafe_output)[i + flattened_start_pos[*target_write_offset]]
                                         .as_mut_ptr()
                                         .write(*d);
                                 };

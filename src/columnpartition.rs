@@ -192,6 +192,10 @@ where
     }
 }
 
+pub struct StringVec {
+    pub strvec: Vec<String>,
+}
+
 impl ColumnPartition<Vec<String>, String> for StringVec {
     fn get_col(&self) -> &Vec<String> {
         &self.strvec

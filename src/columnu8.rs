@@ -26,10 +26,6 @@ pub enum FlattenedColumn<T> {
     VariableLenTypeU8(ColumnU8),
 }
 
-pub struct StringVec {
-    pub strvec: Vec<String>,
-}
-
 pub type ColumnIndex = Option<Vec<Option<usize>>>;
 
 pub type MaybeColumnIndex = Vec<MaybeUninit<Option<usize>>>;

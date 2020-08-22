@@ -4,11 +4,14 @@ mod columnpartition;
 mod columnrepartition;
 mod columnu8;
 mod hashcolumn;
+mod helpers;
 
+pub use bucketcolumn::*;
 pub use columnflatten::*;
 pub use columnpartition::*;
 pub use columnrepartition::*;
-
+pub use columnu8::*;
+pub use helpers::*;
 //TO-DO: Make library safe (e.g.) safe rust code outside of it can't cause UB
 
 #[cfg(test)]
@@ -364,9 +367,8 @@ mod tests {
         bmap.hash.index = new_index;
         let part = PartitionedColumn::VariableLenType(part);
 
-        println!("{:?}", part);
         let part = part.partition_column(&bmap);
-        println!("{:?}", part);
+
         let expected_result = PartitionedColumn::<String>::VariableLenType(vec![
             ColumnU8 {
                 data: vec![101, 101],
@@ -504,5 +506,245 @@ mod tests {
                 len: vec![2, 3, 2]
             })
         )
+    }
+
+    #[test]
+    fn partion_and_flatten() {
+        use rand::distributions::Alphanumeric;
+        use rand::prelude::*;
+        use rayon::prelude::*;
+
+        let strvec: Vec<String> = (0..1000usize)
+            .into_par_iter()
+            .map(|i| {
+                let s: String = thread_rng()
+                    .sample_iter(&Alphanumeric)
+                    .take(i & 7)
+                    .collect();
+                s
+            })
+            .collect();
+        let mut strvec_orig = strvec.clone();
+        let strvec = StringVec { strvec };
+
+        let s = RandomState::new();
+
+        let hash = strvec.hash_column(&s, None);
+
+        let b = BucketColumn::from_hash(hash, 4);
+        let bmap = BucketsSizeMap::from_bucket_column(b, 2);
+
+        let part = strvec.partition_column(&bmap);
+        let part_index = match &part {
+            PartitionedColumn::VariableLenType(columnu8) => {
+                let v: ColumnIndexPartitioned = columnu8.par_iter().map(|_| None).collect();
+                v
+            }
+
+            _ => panic!(),
+        };
+
+        //println!("{:?}", part);
+
+        let flattened_index = part.flatten_index(&part_index);
+
+        let flattened_column = part.flatten(&flattened_index);
+
+        let (data, start_pos, len) = match flattened_column {
+            FlattenedColumn::VariableLenTypeU8(columnu8) => {
+                (columnu8.data, columnu8.start_pos, columnu8.len)
+            }
+            _ => panic!(),
+        };
+
+        let mut strvec: Vec<String> = start_pos
+            .par_iter()
+            .zip_eq(len.par_iter())
+            .map(|(start_pos, len)| {
+                String::from_utf8(data[*start_pos..*start_pos + *len].to_vec()).unwrap()
+            })
+            .collect();
+        strvec.sort();
+        strvec_orig.sort();
+
+        assert_eq!(strvec, strvec_orig);
+    }
+    #[test]
+    fn partion_and_flatten_many_buckets_variable() {
+        use rand::distributions::Alphanumeric;
+        use rand::prelude::*;
+        use rayon::prelude::*;
+
+        let strvec: Vec<String> = (0..1000usize)
+            .into_par_iter()
+            .map(|i| {
+                let s: String = thread_rng()
+                    .sample_iter(&Alphanumeric)
+                    .take(i & 7)
+                    .collect();
+                s
+            })
+            .collect();
+        let mut strvec_orig = strvec.clone();
+        let strvec = StringVec { strvec };
+
+        let s = RandomState::new();
+
+        let hash = strvec.hash_column(&s, None);
+
+        let b = BucketColumn::from_hash(hash, 10);
+        let bmap = BucketsSizeMap::from_bucket_column(b, 2);
+
+        let part = strvec.partition_column(&bmap);
+        let part_index = match &part {
+            PartitionedColumn::VariableLenType(columnu8) => {
+                let v: ColumnIndexPartitioned = columnu8.par_iter().map(|_| None).collect();
+                v
+            }
+
+            _ => panic!(),
+        };
+
+        //println!("{:?}", part);
+
+        let flattened_index = part.flatten_index(&part_index);
+
+        let flattened_column = part.flatten(&flattened_index);
+
+        let (data, start_pos, len) = match flattened_column {
+            FlattenedColumn::VariableLenTypeU8(columnu8) => {
+                (columnu8.data, columnu8.start_pos, columnu8.len)
+            }
+            _ => panic!(),
+        };
+
+        let mut strvec: Vec<String> = start_pos
+            .par_iter()
+            .zip_eq(len.par_iter())
+            .map(|(start_pos, len)| {
+                String::from_utf8(data[*start_pos..*start_pos + *len].to_vec()).unwrap()
+            })
+            .collect();
+        strvec.sort();
+        strvec_orig.sort();
+
+        assert_eq!(strvec, strvec_orig);
+    }
+
+    #[test]
+    fn partion_and_flatten_fixed() {
+        use rand::distributions::{Alphanumeric, Standard};
+        use rand::prelude::*;
+        use rayon::prelude::*;
+
+        let data: Vec<u64> = (0..1000usize)
+            .into_par_iter()
+            .map(|i| {
+                let mut s: Vec<u64> = thread_rng().sample_iter(&Standard).take(1).collect();
+                s.pop().unwrap()
+            })
+            .collect();
+
+        let mut data_orig = data.clone();
+
+        let s = RandomState::new();
+
+        let hash = data.hash_column(&s, None);
+
+        let b = BucketColumn::from_hash(hash, 4);
+        let bmap = BucketsSizeMap::from_bucket_column(b, 2);
+
+        let part = data.partition_column(&bmap);
+        let part_index = match &part {
+            PartitionedColumn::FixedLenType(column) => {
+                let v: ColumnIndexPartitioned = column.par_iter().map(|_| None).collect();
+                v
+            }
+
+            _ => panic!(),
+        };
+
+        //println!("{:?}", part);
+
+        let flattened_index = part.flatten_index(&part_index);
+
+        let flattened_column = part.flatten(&flattened_index);
+
+        let mut data = match flattened_column {
+            FlattenedColumn::FixedLenType(data) => data,
+            _ => panic!(),
+        };
+
+        data_orig.sort();
+        data.sort();
+
+        assert_eq!(data_orig, data);
+    }
+
+    #[test]
+    fn partial_sum_serial_test() {
+        let mut data: Vec<u64> = vec![1, 2, 3, 4, 5, 6, 7, 8];
+        let result = partial_sum_serial(&mut data, 0);
+        assert_eq!(result, vec![1, 3, 6, 10, 15, 21, 28, 36]);
+
+        let mut data: Vec<u64> = vec![1, 2, 3, 4, 5, 6, 7, 8];
+        let result = partial_sum_serial(&mut data, 1);
+        assert_eq!(result, vec![2, 4, 7, 11, 16, 22, 29, 37]);
+    }
+
+    #[test]
+    fn partial_sum_serial_assign_test() {
+        let mut data: Vec<u64> = vec![1, 2, 3, 4, 5, 6, 7, 8];
+        partial_sum_serial_assign(&mut data, 0);
+        assert_eq!(data, vec![1, 3, 6, 10, 15, 21, 28, 36]);
+
+        let mut data: Vec<u64> = vec![1, 2, 3, 4, 5, 6, 7, 8];
+        partial_sum_serial_assign(&mut data, 1);
+        assert_eq!(data, vec![2, 4, 7, 11, 16, 22, 29, 37]);
+    }
+
+    #[test]
+    fn partial_sum_serial_with_buffer_test() {
+        let data: Vec<u64> = vec![1, 2, 3, 4, 5, 6, 7, 8];
+        let mut result: Vec<u64> = vec![0; data.len()];
+        partial_sum_serial_with_buffer(&data, &mut result, 0);
+        assert_eq!(result, vec![1, 3, 6, 10, 15, 21, 28, 36]);
+
+        partial_sum_serial_with_buffer(&data, &mut result, 1);
+        assert_eq!(result, vec![2, 4, 7, 11, 16, 22, 29, 37]);
+    }
+
+    #[test]
+    fn partial_sum_parallel_test() {
+        let mut data: Vec<u64> = vec![1, 2, 3, 4, 5, 6, 7, 8];
+        let result = partial_sum_parallel(&mut data, 0, std::num::NonZeroUsize::new(2).unwrap());
+        assert_eq!(result, vec![1, 3, 6, 10, 15, 21, 28, 36]);
+
+        let mut data: Vec<u64> = vec![1, 2, 3, 4, 5, 6, 7, 8];
+        let result = partial_sum_parallel(&mut data, 1, std::num::NonZeroUsize::new(2).unwrap());
+        assert_eq!(result, vec![2, 4, 7, 11, 16, 22, 29, 37]);
+    }
+
+    #[test]
+    fn prefix_sum_parallel_serial_equal() {
+        use rand::distributions::Standard;
+        use rand::prelude::*;
+        use rayon::prelude::*;
+
+        let input: Vec<u64> = (0..1000usize)
+            .into_par_iter()
+            .map(|_| {
+                let mut s: Vec<u32> = thread_rng().sample_iter(&Standard).take(1).collect();
+                s.pop().unwrap() as u64
+            })
+            .collect();
+
+        let mut res_serial = partial_sum_serial(&input, 0);
+        let res_parallel = partial_sum_parallel(&input, 0, std::num::NonZeroUsize::new(4).unwrap());
+        assert_eq!(res_serial, res_parallel);
+
+        partial_sum_serial_with_buffer(&input, &mut res_serial, 1);
+        let res_parallel = partial_sum_parallel(&input, 1, std::num::NonZeroUsize::new(4).unwrap());
+        assert_eq!(res_serial, res_parallel);
     }
 }
