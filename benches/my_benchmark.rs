@@ -9,7 +9,7 @@ use std::collections::hash_map::RandomState;
 fn partition_and_flatten(c: &mut Criterion) {
     let strvec = prep_data(1_000, 7);
 
-    let sample_data: Vec<StringVec> = [1_000, 10_000, 100_000, 1_000_000, 10_000_000, 100_000_000]
+    let sample_data: Vec<StringVec> = [1_000, 10_000, 100_000, 1_000_000, 10_000_000]
         .iter()
         .map(|i| prep_data(*i, 7))
         .collect();
@@ -17,7 +17,7 @@ fn partition_and_flatten(c: &mut Criterion) {
     let mut group = c.benchmark_group("partition and flatten");
     sample_data.iter().for_each(|strvec| {
         let len = strvec.strvec.len() as u64;
-        group.throughput(Throughput::Bytes(len));
+        group.throughput(Throughput::Elements(len));
         group.bench_with_input(BenchmarkId::from_parameter(len), &strvec, |b, &strvec| {
             b.iter(|| performance_test(&strvec))
         });
@@ -68,6 +68,39 @@ fn performance_test(strvec: &StringVec) {
         FlattenedColumn::FixedLenType(_) => panic![],
         _ => {}
     };
+}
+
+fn prefix_sum(c: &mut Criterion) {
+    use rand::distributions::Standard;
+    use rand::prelude::*;
+    use rayon::prelude::*;
+
+    let input: Vec<u64> = (0..100_000_000usize)
+        .into_par_iter()
+        .map(|_| {
+            let mut s: Vec<u32> = thread_rng().sample_iter(&Standard).take(1).collect();
+            s.pop().unwrap() as u64
+        })
+        .collect();
+
+    let mut output = vec![0; input.len()];
+
+    let mut group = c.benchmark_group("Prefix Sum");
+    group.bench_function("Prefix Sum Serial", |b| {
+        b.iter(|| partial_sum_serial_with_buffer(&input, &mut output, 0))
+    });
+    group.bench_function("Prefix Sum Parallel", |b| {
+        b.iter(|| {
+            partial_sum_parallel_with_buffer(
+                &input,
+                &mut output,
+                0,
+                std::num::NonZeroUsize::new(32).unwrap(),
+            )
+        })
+    });
+
+    group.finish();
 }
 
 criterion_group!(benches, partition_and_flatten);

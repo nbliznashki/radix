@@ -1,9 +1,6 @@
-use crate::bucketcolumn::*;
 use crate::columnu8::*;
-use crate::hashcolumn::*;
 use rayon::prelude::*;
 use std::cell::UnsafeCell;
-use std::hash::{BuildHasher, Hash, Hasher};
 use std::mem::{self, MaybeUninit};
 
 pub trait ColumnFlatten<T> {
@@ -175,7 +172,7 @@ impl<T> ColumnFlatten<T> for PartitionedColumn<T> {
                                 .as_mut_ptr()
                                 .write(index_val.map(|i| i + addon))
                         }),
-                        None => (0..*write_len).into_iter().for_each(|i| unsafe {
+                        None => (0..*write_len).for_each(|i| unsafe {
                             (*unsafe_output)[i + *write_offset]
                                 .as_mut_ptr()
                                 .write(Some(i + addon))
@@ -185,6 +182,7 @@ impl<T> ColumnFlatten<T> for PartitionedColumn<T> {
 
             let output = unsafe_output.data.into_inner();
             //SAFETY - ok to do asall fields of the vector should be populated
+            #[allow(clippy::unsound_collection_transmute)]
             let output: ColumnIndexUnwrapped =
                 unsafe { mem::transmute::<_, ColumnIndexUnwrapped>(output) };
 
@@ -463,6 +461,7 @@ impl<T> ColumnFlatten<T> for PartitionedColumn<T> {
 
                 let flattened_data = unsafe_flattened_data.data.into_inner();
                 //SAFETY - ok to do asall fields of the vector should be populated
+                #[allow(clippy::unsound_collection_transmute)]
                 let flattened_data: Vec<u8> =
                     unsafe { mem::transmute::<_, Vec<u8>>(flattened_data) };
 

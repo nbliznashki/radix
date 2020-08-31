@@ -176,7 +176,7 @@ pub trait ColumnPartition<V, T> {
         }
 
         let output = unsafe_output.data.into_inner();
-        //SAFETY - ok to do asall fields of the vector should be populated
+        //SAFETY - ok to do as all fields of the vector should be populated
         let output: Vec<Vec<T>> = unsafe { mem::transmute::<_, Vec<Vec<T>>>(output) };
         PartitionedColumn::FixedLenType(output)
     }

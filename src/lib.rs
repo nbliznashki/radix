@@ -4,6 +4,7 @@ mod columnpartition;
 mod columnrepartition;
 mod columnu8;
 mod hashcolumn;
+mod hashjoin;
 mod helpers;
 
 pub use bucketcolumn::*;
@@ -11,6 +12,7 @@ pub use columnflatten::*;
 pub use columnpartition::*;
 pub use columnrepartition::*;
 pub use columnu8::*;
+pub use hashjoin::*;
 pub use helpers::*;
 //TO-DO: Make library safe (e.g.) safe rust code outside of it can't cause UB
 
@@ -23,6 +25,8 @@ mod tests {
 
     use std::collections::hash_map::RandomState;
     use std::rc::*;
+
+    use rayon::prelude::*;
 
     //Validate that the function behaves the same way when given an index and when not given an index
     #[test]
@@ -345,7 +349,7 @@ mod tests {
         let b = BucketColumnPartitioned::from_hash(hash, 2);
         let mut bmap = BucketsSizeMapPartitioned::from_bucket_column(b);
 
-        let mut part = if let PartitionedColumn::VariableLenType(part_inner) = part {
+        let part = if let PartitionedColumn::VariableLenType(part_inner) = part {
             part_inner
         } else {
             panic!()
@@ -633,13 +637,13 @@ mod tests {
 
     #[test]
     fn partion_and_flatten_fixed() {
-        use rand::distributions::{Alphanumeric, Standard};
+        use rand::distributions::Standard;
         use rand::prelude::*;
         use rayon::prelude::*;
 
         let data: Vec<u64> = (0..1000usize)
             .into_par_iter()
-            .map(|i| {
+            .map(|_| {
                 let mut s: Vec<u64> = thread_rng().sample_iter(&Standard).take(1).collect();
                 s.pop().unwrap()
             })
@@ -683,12 +687,12 @@ mod tests {
 
     #[test]
     fn partial_sum_serial_test() {
-        let mut data: Vec<u64> = vec![1, 2, 3, 4, 5, 6, 7, 8];
-        let result = partial_sum_serial(&mut data, 0);
+        let data: Vec<u64> = vec![1, 2, 3, 4, 5, 6, 7, 8];
+        let result = partial_sum_serial(&data, 0);
         assert_eq!(result, vec![1, 3, 6, 10, 15, 21, 28, 36]);
 
-        let mut data: Vec<u64> = vec![1, 2, 3, 4, 5, 6, 7, 8];
-        let result = partial_sum_serial(&mut data, 1);
+        let data: Vec<u64> = vec![1, 2, 3, 4, 5, 6, 7, 8];
+        let result = partial_sum_serial(&data, 1);
         assert_eq!(result, vec![2, 4, 7, 11, 16, 22, 29, 37]);
     }
 
@@ -716,12 +720,12 @@ mod tests {
 
     #[test]
     fn partial_sum_parallel_test() {
-        let mut data: Vec<u64> = vec![1, 2, 3, 4, 5, 6, 7, 8];
-        let result = partial_sum_parallel(&mut data, 0, std::num::NonZeroUsize::new(2).unwrap());
+        let data: Vec<u64> = vec![1, 2, 3, 4, 5, 6, 7, 8];
+        let result = partial_sum_parallel(&data, 0, std::num::NonZeroUsize::new(4).unwrap());
         assert_eq!(result, vec![1, 3, 6, 10, 15, 21, 28, 36]);
 
-        let mut data: Vec<u64> = vec![1, 2, 3, 4, 5, 6, 7, 8];
-        let result = partial_sum_parallel(&mut data, 1, std::num::NonZeroUsize::new(2).unwrap());
+        let data: Vec<u64> = vec![1, 2, 3, 4, 5, 6, 7, 8];
+        let result = partial_sum_parallel(&data, 1, std::num::NonZeroUsize::new(4).unwrap());
         assert_eq!(result, vec![2, 4, 7, 11, 16, 22, 29, 37]);
     }
 
@@ -729,9 +733,8 @@ mod tests {
     fn prefix_sum_parallel_serial_equal() {
         use rand::distributions::Standard;
         use rand::prelude::*;
-        use rayon::prelude::*;
 
-        let input: Vec<u64> = (0..1000usize)
+        let input: Vec<u64> = (0..100usize)
             .into_par_iter()
             .map(|_| {
                 let mut s: Vec<u32> = thread_rng().sample_iter(&Standard).take(1).collect();
@@ -740,11 +743,155 @@ mod tests {
             .collect();
 
         let mut res_serial = partial_sum_serial(&input, 0);
-        let res_parallel = partial_sum_parallel(&input, 0, std::num::NonZeroUsize::new(4).unwrap());
+        let res_parallel =
+            partial_sum_parallel(&input, 0, std::num::NonZeroUsize::new(32).unwrap());
         assert_eq!(res_serial, res_parallel);
 
         partial_sum_serial_with_buffer(&input, &mut res_serial, 1);
-        let res_parallel = partial_sum_parallel(&input, 1, std::num::NonZeroUsize::new(4).unwrap());
+        let res_parallel =
+            partial_sum_parallel(&input, 1, std::num::NonZeroUsize::new(32).unwrap());
         assert_eq!(res_serial, res_parallel);
+    }
+    #[test]
+    fn hash_to_bucket_no_indexes() {
+        let hash_left: HashColumn = HashColumn {
+            data: vec![2, 6, 4, 1, 8, 8, 8, 10],
+            index: None,
+        };
+
+        let hash_right: HashColumn = HashColumn {
+            data: vec![2, 4, 6, 8, 3, 8],
+            index: None,
+        };
+
+        let (left_index, right_index) = hash_join(&hash_left, &hash_right, 2);
+        assert_eq!(left_index.len(), 9);
+        assert_eq!(right_index.len(), 9);
+        let mut index_combined: Vec<(usize, usize)> = left_index
+            .iter()
+            .zip(right_index.iter())
+            .map(|(left_i, right_i)| {
+                assert_eq!(hash_left.data[*left_i], hash_right.data[*right_i]);
+                (*left_i, *right_i)
+            })
+            .collect();
+        index_combined.par_sort_unstable();
+        let len_before_dedup = index_combined.len();
+        index_combined.dedup();
+        assert_eq!(len_before_dedup, index_combined.len());
+    }
+    #[test]
+    fn hash_to_bucket_index_left() {
+        let hash_left: HashColumn = HashColumn {
+            data: vec![2, 6, 4, 1, 8, 8, 8, 10],
+            index: Some(vec![
+                Some(7),
+                Some(6),
+                Some(5),
+                Some(4),
+                Some(3),
+                Some(2),
+                Some(1),
+                Some(0),
+            ]),
+        };
+
+        let hash_right: HashColumn = HashColumn {
+            data: vec![2, 4, 6, 8, 3, 8],
+            index: None,
+        };
+
+        let (left_index, right_index) = hash_join(&hash_left, &hash_right, 2);
+        assert_eq!(left_index.len(), 9);
+        assert_eq!(right_index.len(), 9);
+        let mut index_combined: Vec<(usize, usize)> = left_index
+            .iter()
+            .zip(right_index.iter())
+            .map(|(left_i, right_i)| {
+                let left_index = (&hash_left.index.clone().unwrap())[*left_i].unwrap();
+                let value_left = hash_left.data[left_index];
+                let value_right = hash_right.data[*right_i];
+                assert_eq!(value_left, value_right);
+                (*left_i, *right_i)
+            })
+            .collect();
+        index_combined.par_sort_unstable();
+        let len_before_dedup = index_combined.len();
+        index_combined.dedup();
+        assert_eq!(len_before_dedup, index_combined.len());
+    }
+
+    #[test]
+    fn hash_to_bucket_index_right() {
+        let hash_left: HashColumn = HashColumn {
+            data: vec![2, 6, 4, 1, 8, 8, 8, 10],
+            index: None,
+        };
+
+        let hash_right: HashColumn = HashColumn {
+            data: vec![2, 4, 6, 8, 3, 8],
+            index: Some(vec![Some(5), Some(4), Some(3), Some(2), Some(1), Some(0)]),
+        };
+
+        let (left_index, right_index) = hash_join(&hash_left, &hash_right, 2);
+        assert_eq!(left_index.len(), 9);
+        assert_eq!(right_index.len(), 9);
+        let mut index_combined: Vec<(usize, usize)> = left_index
+            .iter()
+            .zip(right_index.iter())
+            .map(|(left_i, right_i)| {
+                let right_index = (&hash_right.index.clone().unwrap())[*right_i].unwrap();
+                let value_right = hash_right.data[right_index];
+                let value_left = hash_left.data[*left_i];
+                assert_eq!(value_left, value_right);
+                (*left_i, *right_i)
+            })
+            .collect();
+        index_combined.par_sort_unstable();
+        let len_before_dedup = index_combined.len();
+        index_combined.dedup();
+        assert_eq!(len_before_dedup, index_combined.len());
+    }
+
+    #[test]
+    fn hash_to_bucket_index_both() {
+        let hash_left: HashColumn = HashColumn {
+            data: vec![2, 6, 4, 1, 8, 8, 8, 10],
+            index: Some(vec![
+                Some(7),
+                Some(6),
+                Some(5),
+                Some(4),
+                Some(3),
+                Some(2),
+                Some(1),
+                Some(0),
+            ]),
+        };
+
+        let hash_right: HashColumn = HashColumn {
+            data: vec![2, 4, 6, 8, 3, 8],
+            index: Some(vec![Some(5), Some(4), Some(3), Some(2), Some(1), Some(0)]),
+        };
+
+        let (left_index, right_index) = hash_join(&hash_left, &hash_right, 2);
+        assert_eq!(left_index.len(), 9);
+        assert_eq!(right_index.len(), 9);
+        let mut index_combined: Vec<(usize, usize)> = left_index
+            .iter()
+            .zip(right_index.iter())
+            .map(|(left_i, right_i)| {
+                let right_index = (&hash_right.index.clone().unwrap())[*right_i].unwrap();
+                let value_right = hash_right.data[right_index];
+                let left_index = (&hash_left.index.clone().unwrap())[*left_i].unwrap();
+                let value_left = hash_left.data[left_index];
+                assert_eq!(value_left, value_right);
+                (*left_i, *right_i)
+            })
+            .collect();
+        index_combined.par_sort_unstable();
+        let len_before_dedup = index_combined.len();
+        index_combined.dedup();
+        assert_eq!(len_before_dedup, index_combined.len());
     }
 }
