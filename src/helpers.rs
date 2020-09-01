@@ -1,6 +1,7 @@
 use rayon::prelude::*;
-use std::{cmp::min, ops::AddAssign};
+use std::ops::AddAssign;
 
+#[allow(dead_code)]
 pub fn partial_sum_serial<T>(input: &[T], start_value: T) -> Vec<T>
 where
     T: AddAssign,
@@ -16,6 +17,7 @@ where
     output
 }
 
+#[allow(dead_code)]
 pub fn partial_sum_serial_assign<T>(input: &mut [T], start_value: T)
 where
     T: AddAssign,
@@ -29,6 +31,7 @@ where
     });
 }
 
+#[allow(dead_code)]
 pub fn partial_sum_serial_assign_nostart<T>(input: &mut [T])
 where
     T: AddAssign,
@@ -37,6 +40,7 @@ where
     (0..input.len() - 1).for_each(|i| input[i + 1] += input[i].clone());
 }
 
+#[allow(dead_code)]
 pub fn partial_sum_serial_with_buffer<T>(input: &[T], output: &mut [T], start_value: T)
 where
     T: AddAssign,
@@ -59,6 +63,7 @@ where
         });
 }
 
+#[allow(dead_code)]
 pub fn partial_sum_serial_with_buffer_nostart<T>(input: &[T], output: &mut [T])
 where
     T: AddAssign,
@@ -79,6 +84,7 @@ where
     }
 }
 
+#[allow(dead_code)]
 pub fn partial_sum_parallel<T>(
     input: &[T],
     start_value: T,
@@ -95,6 +101,7 @@ where
     output
 }
 
+#[allow(dead_code)]
 pub fn partial_sum_parallel_with_buffer<T>(
     input: &[T],
     output: &mut [T],
@@ -112,7 +119,7 @@ pub fn partial_sum_parallel_with_buffer<T>(
         "Input and output slices have different length ",
     );
 
-    let mut p = workers_count.get();
+    let p = workers_count.get();
     let n: usize = input.len();
 
     //If the input vector size is 0, then there is nothing to do

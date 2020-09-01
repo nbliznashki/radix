@@ -21,12 +21,15 @@ impl Deref for BucketColumn {
 impl BucketColumn {
     pub fn from_hash(hash: HashColumn, bucket_bits: u32) -> BucketColumn {
         let buckets_count = 2usize.pow(bucket_bits);
-        assert!((buckets_count as u64) < (u64::MAX) / 2, "Too many buckets");
+        assert!(
+            (buckets_count as u64) < ((u64::MAX) / 2),
+            "Too many buckets"
+        );
         BucketColumn {
             data: hash
                 .data
                 .par_iter()
-                .map(|h| (h % (2 * buckets_count as u64)) as usize)
+                .map(|h| (h % (buckets_count as u64)) as usize)
                 .collect(),
             buckets_count,
             hash,
@@ -59,7 +62,7 @@ impl BucketColumnPartitioned {
                 .map(|hash_chunk| {
                     hash_chunk
                         .iter()
-                        .map(|h| (h % (2 * buckets_count as u64)) as usize)
+                        .map(|h| (h % (buckets_count as u64)) as usize)
                         .collect()
                 })
                 .collect(),
@@ -97,9 +100,7 @@ impl BucketsSizeMap {
                 let mut local_map: Vec<usize> = vec![0; bc.buckets_count];
                 chunk
                     .iter()
-                    .filter(|bucket_id| *bucket_id & 1 == 0)
-                    .map(|bucket_id| bucket_id >> 1)
-                    .for_each(|bucket_id| local_map[bucket_id] += 1);
+                    .for_each(|bucket_id| local_map[*bucket_id] += 1);
                 local_map
             })
             .collect();
@@ -161,9 +162,7 @@ impl BucketsSizeMapPartitioned {
                 let mut local_map: Vec<usize> = vec![0; bc.buckets_count];
                 chunk
                     .iter()
-                    .filter(|bucket_id| *bucket_id & 1 == 0)
-                    .map(|bucket_id| bucket_id >> 1)
-                    .for_each(|bucket_id| local_map[bucket_id] += 1);
+                    .for_each(|bucket_id| local_map[*bucket_id] += 1);
                 local_map
             })
             .collect();

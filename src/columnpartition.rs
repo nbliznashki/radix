@@ -4,13 +4,15 @@ use std::hash::{BuildHasher, Hash, Hasher};
 use std::mem::{self, MaybeUninit};
 use std::ops::Deref;
 
+use crate::bitmap::*;
 use crate::bucketcolumn::*;
 use crate::columnu8::*;
 use crate::hashcolumn::*;
 
 pub trait ColumnPartition<V, T> {
     fn get_col(&self) -> &V;
-    fn hash_column<S>(&self, s: &S, index: ColumnIndex) -> HashColumn
+    fn get_col_mut(&mut self) -> &mut V;
+    fn hash_column<S>(&self, index: &ColumnIndex, bitmap: &Option<Bitmap>, s: &S) -> HashColumn
     where
         S: BuildHasher + Sync,
         V: Deref<Target = [T]>,
@@ -18,67 +20,174 @@ pub trait ColumnPartition<V, T> {
         T: Send + Sync,
         T: Hash,
     {
-        let data = if let Some(index) = &index {
-            let data = &self.get_col();
-            index
-                .par_iter()
-                .map(|i| match i {
-                    Some(i) => {
-                        let mut h = s.build_hasher();
-                        data[*i].hash(&mut h);
-                        h.finish() << 1
-                    }
-                    None => 1,
-                })
-                .collect()
-        } else {
-            (&self.get_col())
-                .par_iter()
-                .map(|t| {
-                    let mut h = s.build_hasher();
-                    t.hash(&mut h);
-                    h.finish() << 1
-                })
-                .collect()
+        let data = &self.get_col();
+
+        let mut data_hash: Vec<u64> = Vec::new();
+        let mut bitmap_hash: Option<Bitmap> = None;
+
+        if let Some(bitmap) = &bitmap {
+            assert_eq!(bitmap.len(), data.len());
+            if let Some(index) = &index {
+                let bits = index.par_iter().map(|i| bitmap.bits[*i]).collect();
+                bitmap_hash = Some(Bitmap { bits });
+            } else {
+                bitmap_hash = Some((*bitmap).clone());
+            }
         };
-        HashColumn { data, index }
-    }
-    fn hash_column_append<S>(&self, s: &S, h: &mut HashColumn)
-    where
-        S: BuildHasher + Sync,
-        V: Deref<Target = [T]>,
-        V: Sync,
-        T: Send + Sync,
-        T: Hash,
-    {
-        if let Some(index) = &h.index {
-            let data = &self.get_col();
-            h.data
-                .par_iter_mut()
-                .zip_eq(index.par_iter())
-                .filter(|(current_hash, _)| **current_hash & 1 == 0)
-                .for_each(|(current_hash, i)| match i {
-                    None => *current_hash = 1,
-                    Some(i) => {
-                        let mut h = s.build_hasher();
-                        data[*i].hash(&mut h);
-                        *current_hash = current_hash.wrapping_add(h.finish() << 1);
-                    }
-                });
+        if let Some(bitmap_hash) = &bitmap_hash {
+            match &index {
+                None => {
+                    data_hash.par_extend(data.par_iter().zip_eq(bitmap_hash.bits.par_iter()).map(
+                        |(t, nullbit)| {
+                            if *nullbit != 0 {
+                                let mut h = s.build_hasher();
+                                t.hash(&mut h);
+                                h.finish()
+                            } else {
+                                u64::MAX
+                            }
+                        },
+                    ))
+                }
+                Some(index) => {
+                    data_hash.par_extend(index.par_iter().zip_eq(bitmap_hash.bits.par_iter()).map(
+                        |(i, nullbit)| {
+                            if *nullbit != 0 {
+                                let mut h = s.build_hasher();
+                                data[*i].hash(&mut h);
+                                h.finish()
+                            } else {
+                                u64::MAX
+                            }
+                        },
+                    ))
+                }
+            };
         } else {
-            h.data
-                .par_iter_mut()
-                .zip_eq((&self.get_col()).par_iter())
-                .filter(|(current_hash, _)| **current_hash & 1 == 0)
-                .for_each(|(current_hash, t)| {
+            match &index {
+                None => data_hash.par_extend(data.par_iter().map(|t| {
                     let mut h = s.build_hasher();
                     t.hash(&mut h);
-                    *current_hash = current_hash.wrapping_add(h.finish() << 1);
-                });
+                    h.finish()
+                })),
+                Some(index) => data_hash.par_extend(index.par_iter().map(|i| {
+                    let mut h = s.build_hasher();
+                    data[*i].hash(&mut h);
+                    h.finish()
+                })),
+            };
+        }
+
+        HashColumn {
+            data: data_hash,
+            //index: index.clone(),
+            bitmap: bitmap_hash,
         }
     }
+    fn hash_column_append<S>(
+        &self,
+        index: &ColumnIndex,
+        bitmap: &Option<Bitmap>,
+        s: &S,
+        h: &mut HashColumn,
+    ) where
+        S: BuildHasher + Sync,
+        V: Deref<Target = [T]>,
+        V: Sync,
+        T: Send + Sync,
+        T: Hash,
+    {
+        let data = &self.get_col();
 
-    fn partition_column(&self, bmap: &BucketsSizeMap) -> PartitionedColumn<T>
+        let mut bitmap_hash: Option<Bitmap> = None;
+
+        if let Some(bitmap) = &bitmap {
+            assert_eq!(bitmap.len(), data.len());
+            if let Some(index) = &index {
+                let bits = index.par_iter().map(|i| bitmap.bits[*i]).collect();
+                bitmap_hash = Some(Bitmap { bits });
+            } else {
+                bitmap_hash = Some((*bitmap).clone());
+            }
+        };
+
+        if let Some(index) = index {
+            assert_eq!(index.len(), h.data.len());
+        } else {
+            assert_eq!(data.len(), h.data.len());
+        };
+
+        if let Some(bitmap_hash) = &bitmap_hash {
+            match &index {
+                None => h
+                    .data
+                    .par_iter_mut()
+                    .zip_eq(data.par_iter())
+                    .zip_eq(bitmap_hash.bits.par_iter())
+                    .for_each(|((current_hash, t), nullbit)| {
+                        if *nullbit != 0 {
+                            let mut h = s.build_hasher();
+                            t.hash(&mut h);
+                            *current_hash = current_hash.wrapping_add(h.finish());
+                        } else {
+                            *current_hash = current_hash.wrapping_add(u64::MAX);
+                        }
+                    }),
+                Some(index) => h
+                    .data
+                    .par_iter_mut()
+                    .zip_eq(index.par_iter())
+                    .zip_eq(bitmap_hash.bits.par_iter())
+                    .for_each(|((current_hash, i), nullbit)| {
+                        if *nullbit != 0 {
+                            let mut h = s.build_hasher();
+                            data[*i].hash(&mut h);
+                            *current_hash = current_hash.wrapping_add(h.finish());
+                        } else {
+                            *current_hash = current_hash.wrapping_add(u64::MAX);
+                        }
+                    }),
+            };
+        } else {
+            match &index {
+                None => {
+                    h.data
+                        .par_iter_mut()
+                        .zip_eq(data.par_iter())
+                        .for_each(|(current_hash, t)| {
+                            let mut h = s.build_hasher();
+                            t.hash(&mut h);
+                            *current_hash = current_hash.wrapping_add(h.finish());
+                        })
+                }
+                Some(index) => {
+                    h.data
+                        .par_iter_mut()
+                        .zip_eq(index.par_iter())
+                        .for_each(|(current_hash, i)| {
+                            let mut h = s.build_hasher();
+                            data[*i].hash(&mut h);
+                            *current_hash = current_hash.wrapping_add(h.finish());
+                        })
+                }
+            };
+        };
+
+        if let Some(mut bitmap_hash) = bitmap_hash {
+            if let Some(bitmap_current) = &h.bitmap {
+                bitmap_hash &= &bitmap_current;
+            };
+
+            h.bitmap = Some(bitmap_hash);
+        };
+    }
+
+    fn partition_column(
+        &self,
+        index: &ColumnIndex,
+        bitmap: &Option<Bitmap>,
+        bmap: &BucketsSizeMap,
+    ) -> PartitionedColumn<T>
     where
         V: Deref<Target = [T]>,
         V: Sync,
@@ -86,7 +195,6 @@ pub trait ColumnPartition<V, T> {
         T: Clone,
     {
         let column_data = self.get_col();
-        let index = &bmap.hash.index;
 
         let column_len = match index {
             Some(v) => v.len(),
@@ -136,15 +244,14 @@ pub trait ColumnPartition<V, T> {
                     bucket_chunk
                         .iter()
                         .zip(index_chunk.iter())
-                        .filter(|(bucket_id, _)| *bucket_id & 1 == 0)
-                        .map(|(bucket_id, index)| (bucket_id >> 1, index))
+                        .map(|(bucket_id, index)| (*bucket_id, index))
                         .for_each(|(bucket_id, index)| {
                             //SAFETY - ok to do, due to the way the offset is calculated - no two threads should try to write at the same
                             //offset in the vector, and all fields of the vector should be populated
                             unsafe {
                                 (*unsafe_output)[bucket_id][offset[bucket_id]]
                                     .as_mut_ptr()
-                                    .write(data[(*index).unwrap()].clone());
+                                    .write(data[*index].clone());
                             };
                             offset[bucket_id] += 1;
                         })
@@ -160,8 +267,7 @@ pub trait ColumnPartition<V, T> {
                     bucket_chunk
                         .iter()
                         .zip(data_chunk.iter())
-                        .filter(|(bucket_id, _)| *bucket_id & 1 == 0)
-                        .map(|(bucket_id, data)| (bucket_id >> 1, data))
+                        .map(|(bucket_id, data)| (*bucket_id, data))
                         .for_each(|(bucket_id, data)| {
                             //SAFETY - ok to do, due to the way the offset is calculated - no two threads should try to write at the same
                             //offset in the vector, and all fields of the vector should be populated
@@ -178,7 +284,14 @@ pub trait ColumnPartition<V, T> {
         let output = unsafe_output.data.into_inner();
         //SAFETY - ok to do as all fields of the vector should be populated
         let output: Vec<Vec<T>> = unsafe { mem::transmute::<_, Vec<Vec<T>>>(output) };
-        PartitionedColumn::FixedLenType(output)
+
+        let bitmap_partitioned = if let Some(bitmap) = bitmap {
+            bitmap.partition(index, bmap)
+        } else {
+            output.par_iter().map(|_| None).collect()
+        };
+        let index_partitioned: ColumnIndexPartitioned = output.par_iter().map(|_| None).collect();
+        PartitionedColumn::FixedLenType(output, index_partitioned, bitmap_partitioned)
     }
 }
 
@@ -190,6 +303,9 @@ where
     fn get_col(&self) -> &Vec<T> {
         &self
     }
+    fn get_col_mut(&mut self) -> &mut Vec<T> {
+        self
+    }
 }
 
 pub struct StringVec {
@@ -200,9 +316,16 @@ impl ColumnPartition<Vec<String>, String> for StringVec {
     fn get_col(&self) -> &Vec<String> {
         &self.strvec
     }
-    fn partition_column(&self, bmap: &BucketsSizeMap) -> PartitionedColumn<String> {
+    fn get_col_mut(&mut self) -> &mut Vec<String> {
+        &mut self.strvec
+    }
+    fn partition_column(
+        &self,
+        index: &ColumnIndex,
+        bitmap: &Option<Bitmap>,
+        bmap: &BucketsSizeMap,
+    ) -> PartitionedColumn<String> {
         let column_data = self.get_col();
-        let index = &bmap.hash.index;
 
         let column_len = match &index {
             Some(v) => v.len(),
@@ -224,10 +347,9 @@ impl ColumnPartition<Vec<String>, String> for StringVec {
                     index_chunk
                         .iter()
                         .zip(bucket_chunk.iter())
-                        .filter(|(_index_id, bucket_id)| *bucket_id & 1 == 0)
-                        .map(|(index_id, bucket_id)| (index_id, bucket_id >> 1))
+                        .map(|(index_id, bucket_id)| (index_id, *bucket_id))
                         .for_each(|(index_id, bucket_id)| {
-                            local_map[bucket_id] += column_data[index_id.unwrap()].as_bytes().len()
+                            local_map[bucket_id] += column_data[*index_id].as_bytes().len()
                         });
                     local_map
                 })
@@ -241,8 +363,7 @@ impl ColumnPartition<Vec<String>, String> for StringVec {
                     data_chunk
                         .iter()
                         .zip(bucket_chunk.iter())
-                        .filter(|(_index_id, bucket_id)| *bucket_id & 1 == 0)
-                        .map(|(data, bucket_id)| (data, bucket_id >> 1))
+                        .map(|(data, bucket_id)| (data, *bucket_id))
                         .for_each(|(data, bucket_id)| {
                             local_map[bucket_id] += data.as_bytes().len()
                         });
@@ -324,12 +445,11 @@ impl ColumnPartition<Vec<String>, String> for StringVec {
                         bucket_chunk
                             .iter()
                             .zip(index_chunk.iter())
-                            .filter(|(bucket_id, _)| *bucket_id & 1 == 0)
-                            .map(|(bucket_id, index)| (bucket_id >> 1, index))
+                            .map(|(bucket_id, index)| (*bucket_id, index))
                             .for_each(|(bucket_id, index)| {
                                 //SAFETY - ok to do, due to the way the offset is calculated - no two threads should try to write at the same
                                 //offset in the vector, and all fields of the vector should be populated
-                                let slice_to_write = column_data[(*index).unwrap()].as_bytes();
+                                let slice_to_write = column_data[*index].as_bytes();
                                 unsafe {
                                     slice_to_write.iter().enumerate().for_each(|(i, c)| {
                                         (*unsafe_output)[bucket_id].data
@@ -371,8 +491,7 @@ impl ColumnPartition<Vec<String>, String> for StringVec {
                         bucket_chunk
                             .iter()
                             .zip(data_chunk.iter())
-                            .filter(|(bucket_id, _)| *bucket_id & 1 == 0)
-                            .map(|(bucket_id, data)| (bucket_id >> 1, data))
+                            .map(|(bucket_id, data)| (*bucket_id, data))
                             .for_each(|(bucket_id, data)| {
                                 //SAFETY - ok to do, due to the way the offset is calculated - no two threads should try to write at the same
                                 //offset in the vector, and all fields of the vector should be populated
@@ -408,6 +527,13 @@ impl ColumnPartition<Vec<String>, String> for StringVec {
         //SAFETY - ok to do asall fields of the vector should be populated
         let output: Vec<ColumnU8> = unsafe { mem::transmute::<_, Vec<ColumnU8>>(output) };
 
-        PartitionedColumn::VariableLenType(output)
+        let bitmap_partitioned = if let Some(bitmap) = bitmap {
+            bitmap.partition(index, bmap)
+        } else {
+            output.par_iter().map(|_| None).collect()
+        };
+        let index_partitioned: ColumnIndexPartitioned = output.par_iter().map(|_| None).collect();
+
+        PartitionedColumn::VariableLenType(output, index_partitioned, bitmap_partitioned)
     }
 }

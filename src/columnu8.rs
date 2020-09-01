@@ -1,3 +1,5 @@
+use crate::bitmap::*;
+
 use std::mem::MaybeUninit;
 
 #[derive(Debug, PartialEq)]
@@ -15,21 +17,21 @@ pub(crate) struct MaybeColumnU8 {
 
 #[derive(Debug, PartialEq)]
 pub enum PartitionedColumn<T> {
-    FixedLenType(Vec<Vec<T>>),
-    VariableLenType(Vec<ColumnU8>),
+    FixedLenType(Vec<Vec<T>>, ColumnIndexPartitioned, Vec<Option<Bitmap>>),
+    VariableLenType(Vec<ColumnU8>, ColumnIndexPartitioned, Vec<Option<Bitmap>>),
 }
 
 #[derive(Debug, PartialEq)]
 pub enum FlattenedColumn<T> {
-    FixedLenType(Vec<T>),
-    VariableLenType(Vec<String>),
-    VariableLenTypeU8(ColumnU8),
+    FixedLenType(Vec<T>, Option<Bitmap>),
+    VariableLenType(Vec<String>, Option<Bitmap>),
+    VariableLenTypeU8(ColumnU8, Option<Bitmap>),
 }
 
-pub type ColumnIndex = Option<Vec<Option<usize>>>;
+pub type ColumnIndex = Option<Vec<usize>>;
 
-pub type MaybeColumnIndex = Vec<MaybeUninit<Option<usize>>>;
-pub type ColumnIndexUnwrapped = Vec<Option<usize>>;
+pub type MaybeColumnIndex = Vec<MaybeUninit<usize>>;
+pub type ColumnIndexUnwrapped = Vec<usize>;
 
 pub type ColumnIndexPartitioned = Vec<ColumnIndex>;
 #[derive(Debug)]

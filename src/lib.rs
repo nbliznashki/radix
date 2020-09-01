@@ -1,3 +1,4 @@
+mod bitmap;
 mod bucketcolumn;
 mod columnflatten;
 mod columnpartition;
@@ -6,6 +7,7 @@ mod columnu8;
 mod hashcolumn;
 mod hashjoin;
 mod helpers;
+mod operations;
 
 pub use bucketcolumn::*;
 pub use columnflatten::*;
@@ -13,11 +15,11 @@ pub use columnpartition::*;
 pub use columnrepartition::*;
 pub use columnu8::*;
 pub use hashjoin::*;
-pub use helpers::*;
 //TO-DO: Make library safe (e.g.) safe rust code outside of it can't cause UB
 
 #[cfg(test)]
 mod tests {
+    use crate::bitmap::*;
     use crate::bucketcolumn::*;
     use crate::columnu8::*;
     use crate::hashcolumn::*;
@@ -39,6 +41,9 @@ mod tests {
             fn get_col(&self) -> &Vec<usize> {
                 &self.col
             }
+            fn get_col_mut(&mut self) -> &mut Vec<usize> {
+                Rc::get_mut(&mut self.col).unwrap()
+            }
         }
     }
     #[test]
@@ -46,9 +51,9 @@ mod tests {
         let s = RandomState::new();
         let v: Vec<usize> = vec![1, 1, 2, 3];
 
-        let r1 = v.hash_column(&s, None);
-        let index: Vec<Option<usize>> = vec![Some(0), Some(1), Some(2), Some(3)];
-        let r2 = v.hash_column(&s, Some(index));
+        let r1 = v.hash_column(&None, &None, &s);
+        let index: Vec<usize> = vec![0, 1, 2, 3];
+        let r2 = v.hash_column(&Some(index), &None, &s);
         assert_eq!(r1.data, r2.data);
     }
 
@@ -58,12 +63,12 @@ mod tests {
         let s = RandomState::new();
         let v: Vec<usize> = vec![1, 1, 2, 3];
 
-        let mut r1 = v.hash_column(&s, None);
-        v.hash_column_append(&s, &mut r1);
+        let mut r1 = v.hash_column(&None, &None, &s);
+        v.hash_column_append(&None, &None, &s, &mut r1);
 
         let _index: Vec<Option<usize>> = vec![Some(0), Some(1), Some(2), Some(3)];
-        let mut r2 = v.hash_column(&s, None);
-        v.hash_column_append(&s, &mut r2);
+        let mut r2 = v.hash_column(&None, &None, &s);
+        v.hash_column_append(&None, &None, &s, &mut r2);
         assert_eq!(r1, r2);
     }
     //Validate that the function behaves the same way when given an index and when not given an index
@@ -72,49 +77,72 @@ mod tests {
         let s = RandomState::new();
         let v: Vec<usize> = vec![1, 1, 2, 3];
 
-        let mut r1 = v.hash_column(&s, None);
-        v.hash_column_append(&s, &mut r1);
+        let mut r1 = v.hash_column(&None, &None, &s);
+        v.hash_column_append(&None, &None, &s, &mut r1);
 
-        let index: Vec<Option<usize>> = vec![Some(0), Some(1), None, Some(3)];
-        let mut r2 = v.hash_column(&s, None);
-        r2.index = Some(index);
-        v.hash_column_append(&s, &mut r2);
+        let bitmap = Some(Bitmap {
+            bits: vec![1, 1, 0, 1],
+        });
+
+        let mut r2 = v.hash_column(&None, &None, &s);
+
+        r2.bitmap = bitmap;
+        v.hash_column_append(&None, &None, &s, &mut r2);
         assert_eq!(r1.data[0], r2.data[0]);
         assert_eq!(r1.data[1], r2.data[1]);
-        assert!(r1.data[2] != r2.data[2]);
+        assert_eq!(r1.data[2], r2.data[2]);
         assert_eq!(r1.data[3], r2.data[3]);
+
+        assert!(r1.bitmap.is_none());
+        assert!(r2.bitmap.is_some());
+        assert_eq!(r2.bitmap.unwrap().bits, vec![1, 1, 0, 1]);
     }
+
     //Validate that the function behaves the same way when given an index and when not given an index
     #[test]
-    fn first_bit_hash_with_null() {
+    fn first_bit_hash_add_with_null_equal() {
         let s = RandomState::new();
-        let v: Vec<usize> = vec![1, 1, 2, 3];
+        let v1: Vec<usize> = vec![1, 2, 3, 4, 5];
+        let v2: Vec<usize> = vec![5, 4, 3, 2, 1];
 
-        let index: Vec<Option<usize>> = vec![Some(0), Some(1), None, Some(2), Some(3)];
-        let r1 = v.hash_column(&s, Some(index));
+        let bitmap = Some(Bitmap {
+            bits: vec![1, 1, 0, 1, 1],
+        });
 
-        assert_eq!(r1[0] & 1, 0);
-        assert_eq!(r1[1] & 1, 0);
-        assert_eq!(r1[2] & 1, 1);
-        assert_eq!(r1[3] & 1, 0);
-        assert_eq!(r1[4] & 1, 0);
+        let index: Vec<usize> = vec![0, 1, 2, 3, 4];
+        let index = Some(index);
+        let mut r1 = v1.hash_column(&index, &bitmap, &s);
+        v2.hash_column_append(&None, &None, &s, &mut r1);
+
+        let mut r2 = v1.hash_column(&None, &None, &s);
+        v2.hash_column_append(&index, &bitmap, &s, &mut r2);
+
+        assert_eq!(r1.data, r2.data);
     }
-    //Validate that the function behaves the same way when given an index and when not given an index
+
     #[test]
-    fn first_bit_hash_add_with_null() {
+    fn first_bit_hash_add_with_null_diff() {
         let s = RandomState::new();
-        let v1: Vec<usize> = vec![1, 1, 2, 3, 5];
-        let v2: Vec<usize> = vec![1, 1, 2, 3];
+        let v1: Vec<usize> = vec![1, 2, 3, 4, 5];
+        let v2: Vec<usize> = vec![5, 4, 3, 2, 1];
 
-        let index: Vec<Option<usize>> = vec![Some(0), Some(1), None, Some(2), Some(3)];
-        let mut r1 = v1.hash_column(&s, Some(index));
-        v2.hash_column_append(&s, &mut r1);
+        let bitmap = Some(Bitmap {
+            bits: vec![1, 1, 1, 0, 1],
+        });
 
-        assert_eq!(r1[0] & 1, 0);
-        assert_eq!(r1[1] & 1, 0);
-        assert_eq!(r1[2] & 1, 1);
-        assert_eq!(r1[3] & 1, 0);
-        assert_eq!(r1[4] & 1, 0);
+        let index: Vec<usize> = vec![0, 1, 2, 3, 4];
+        let index = Some(index);
+        let mut r1 = v1.hash_column(&index, &bitmap, &s);
+        v2.hash_column_append(&None, &None, &s, &mut r1);
+
+        let mut r2 = v1.hash_column(&None, &None, &s);
+        v2.hash_column_append(&index, &bitmap, &s, &mut r2);
+
+        assert_eq!(r1.data[0], r2.data[0]);
+        assert_eq!(r1.data[1], r2.data[1]);
+        assert_eq!(r1.data[2], r2.data[2]);
+        assert!(r1.data[3] != r2.data[3]);
+        assert_eq!(r1.data[4], r2.data[4]);
     }
 
     //Should not be possible to add a column of different length
@@ -125,20 +153,22 @@ mod tests {
         let v1: Vec<usize> = vec![1, 1, 2, 3, 5];
         let v2: Vec<usize> = vec![1, 1, 2, 3];
 
-        let index: Vec<Option<usize>> = vec![Some(0), Some(1), None, Some(2), Some(3)];
-        let mut r1 = v1.hash_column(&s, Some(index));
-        r1.index = None;
-        v2.hash_column_append(&s, &mut r1);
+        let index: Vec<usize> = vec![0, 1, 2, 3, 4];
+        let mut r1 = v1.hash_column(&Some(index), &None, &s);
+        v2.hash_column_append(&None, &None, &s, &mut r1);
     }
 
     #[test]
     fn bucket_init() {
         let hash: HashColumn = HashColumn {
             data: vec![1, 2, 4, 6, 8, 10],
-            index: None,
+            bitmap: Some(Bitmap {
+                bits: vec![0, 1, 1, 1, 1, 1],
+            }),
         };
         let b = BucketColumn::from_hash(hash, 2);
-        assert_eq!(*b, vec![1, 2, 4, 6, 0, 2]);
+        println!("{:?}", &b.data);
+        assert_eq!(*b, vec![1, 2, 0, 2, 0, 2]);
     }
 
     #[test]
@@ -146,7 +176,7 @@ mod tests {
     fn bucket_init_overflow() {
         let hash: HashColumn = HashColumn {
             data: vec![1, 2, 4, 6, 8, 10],
-            index: None,
+            bitmap: None,
         };
         let _b = BucketColumn::from_hash(hash, 63);
     }
@@ -155,12 +185,12 @@ mod tests {
     fn bucket_map_init() {
         let hash: HashColumn = HashColumn {
             data: vec![1, 2, 4, 6, 8, 10],
-            index: None,
+            bitmap: None,
         };
         let b = BucketColumn::from_hash(hash, 2);
-        assert_eq!(*b, vec![1, 2, 4, 6, 0, 2]);
+        assert_eq!(*b, vec![1, 2, 0, 2, 0, 2]);
         let bmap = BucketsSizeMap::from_bucket_column(b, 2);
-        assert_eq!(*bmap, vec![vec![0, 1, 1, 0], vec![1, 1, 0, 1]]);
+        assert_eq!(*bmap, vec![vec![1, 1, 1, 0], vec![1, 0, 2, 0]]);
         //println!("{:?}", *bmap)
     }
 
@@ -168,12 +198,12 @@ mod tests {
     fn bucket_map_init_serial() {
         let hash: HashColumn = HashColumn {
             data: vec![1, 2, 4, 6, 8, 10],
-            index: None,
+            bitmap: None,
         };
         let b = BucketColumn::from_hash(hash, 2);
-        assert_eq!(*b, vec![1, 2, 4, 6, 0, 2]);
+        assert_eq!(*b, vec![1, 2, 0, 2, 0, 2]);
         let bmap = BucketsSizeMap::from_bucket_column(b, 1);
-        assert_eq!(*bmap, vec![vec![1, 2, 1, 1]]);
+        assert_eq!(*bmap, vec![vec![2, 1, 3, 0]]);
         //println!("{:?}", *bmap)
     }
 
@@ -181,42 +211,45 @@ mod tests {
     fn bucket_size_map_init() {
         let hash: HashColumn = HashColumn {
             data: vec![1, 2, 4, 6, 8, 10],
-            index: None,
+            bitmap: None,
         };
         let b = BucketColumn::from_hash(hash, 2);
-        assert_eq!(*b, vec![1, 2, 4, 6, 0, 2]);
+        assert_eq!(*b, vec![1, 2, 0, 2, 0, 2]);
         let bmap = BucketsSizeMap::from_bucket_column(b, 2);
-        assert_eq!(*bmap, vec![vec![0, 1, 1, 0], vec![1, 1, 0, 1]]);
-        assert_eq!(bmap.offsets, vec![vec![0, 0, 0, 0], vec![0, 1, 1, 0]]);
-        assert_eq!(bmap.bucket_sizes, vec![1, 2, 1, 1]);
+        assert_eq!(*bmap, vec![vec![1, 1, 1, 0], vec![1, 0, 2, 0]]);
+        assert_eq!(bmap.offsets, vec![vec![0, 0, 0, 0], vec![1, 1, 1, 0]]);
+        assert_eq!(bmap.bucket_sizes, vec![2, 1, 3, 0]);
         //println!("{:?}", *bmap)
     }
     #[test]
-    fn partition_column_test() {
+    fn partition_column_test_a() {
         let hash: HashColumn = HashColumn {
             data: vec![1, 2, 4, 6, 8, 10],
-            index: None,
+            bitmap: None,
         };
         let data = vec![1, 2, 4, 6, 8, 10];
         let b = BucketColumn::from_hash(hash, 2);
-        assert_eq!(*b, vec![1, 2, 4, 6, 0, 2]);
+        assert_eq!(*b, vec![1, 2, 0, 2, 0, 2]);
         let bmap = BucketsSizeMap::from_bucket_column(b, 2);
-        assert_eq!(*bmap, vec![vec![0, 1, 1, 0], vec![1, 1, 0, 1]]);
-        assert_eq!(bmap.offsets, vec![vec![0, 0, 0, 0], vec![0, 1, 1, 0]]);
-        assert_eq!(bmap.bucket_sizes, vec![1, 2, 1, 1]);
 
-        let part = data.partition_column(&bmap);
+        let part = data.partition_column(&None, &None, &bmap);
         assert_eq!(
             part,
-            PartitionedColumn::FixedLenType(vec![vec![8], vec![2, 10], vec![4], vec![6]])
+            PartitionedColumn::FixedLenType(
+                vec![vec![4, 8], vec![1], vec![2, 6, 10], vec![]],
+                vec![None, None, None, None],
+                vec![None, None, None, None]
+            )
         );
     }
 
     #[test]
-    fn partition_column_test_string() {
+    fn partition_column_test_string_a() {
         let hash: HashColumn = HashColumn {
-            data: vec![1, 2, 4, 6, 8, 10],
-            index: None,
+            data: vec![1, 1, 2, 3, 4, 5],
+            bitmap: Some(Bitmap {
+                bits: vec![0, 1, 1, 1, 1, 1],
+            }),
         };
         let strvec: Vec<String> = vec![
             "aa".to_string(),
@@ -228,64 +261,85 @@ mod tests {
         ];
         let strvec = StringVec { strvec };
         let b = BucketColumn::from_hash(hash, 2);
-        assert_eq!(*b, vec![1, 2, 4, 6, 0, 2]);
+
         let bmap = BucketsSizeMap::from_bucket_column(b, 2);
-        assert_eq!(*bmap, vec![vec![0, 1, 1, 0], vec![1, 1, 0, 1]]);
-        assert_eq!(bmap.offsets, vec![vec![0, 0, 0, 0], vec![0, 1, 1, 0]]);
-        assert_eq!(bmap.bucket_sizes, vec![1, 2, 1, 1]);
+        let bitmap = Some(Bitmap {
+            bits: vec![0, 1, 1, 1, 1, 1],
+        });
+        let part = strvec.partition_column(&None, &bitmap, &bmap);
 
-        let part = strvec.partition_column(&bmap);
-
-        let expected_result = PartitionedColumn::<String>::VariableLenType(vec![
-            ColumnU8 {
-                data: vec![101, 101],
-                start_pos: vec![0],
-                len: vec![2],
-            },
-            ColumnU8 {
-                data: vec![98, 98, 102, 102, 102],
-                start_pos: vec![0, 2],
-                len: vec![2, 3],
-            },
-            ColumnU8 {
-                data: vec![99, 99],
-                start_pos: vec![0],
-                len: vec![2],
-            },
-            ColumnU8 {
-                data: vec![100, 100],
-                start_pos: vec![0],
-                len: vec![2],
-            },
-        ]);
+        let expected_result = PartitionedColumn::<String>::VariableLenType(
+            vec![
+                ColumnU8 {
+                    data: vec![101, 101],
+                    start_pos: vec![0],
+                    len: vec![2],
+                },
+                ColumnU8 {
+                    data: vec![97, 97, 98, 98, 102, 102, 102],
+                    start_pos: vec![0, 2, 4],
+                    len: vec![2, 2, 3],
+                },
+                ColumnU8 {
+                    data: vec![99, 99],
+                    start_pos: vec![0],
+                    len: vec![2],
+                },
+                ColumnU8 {
+                    data: vec![100, 100],
+                    start_pos: vec![0],
+                    len: vec![2],
+                },
+            ],
+            vec![None, None, None, None],
+            vec![
+                Some(Bitmap { bits: vec![1] }),
+                Some(Bitmap {
+                    bits: vec![0, 1, 1],
+                }),
+                Some(Bitmap { bits: vec![1] }),
+                Some(Bitmap { bits: vec![1] }),
+            ],
+        );
         assert_eq!(part, expected_result);
     }
 
     #[test]
-    fn repartition_column_test() {
+    fn repartition_column_test_a() {
         let data: Vec<u64> = vec![1, 2, 4, 6, 8, 10];
-
         let hash: HashColumn = HashColumn {
-            data: vec![8, 2, 2, 2, 2, 6],
-            index: Some(vec![Some(0), Some(1), Some(2), Some(3), Some(4), Some(5)]),
+            data: vec![4, 1, 1, 1, 1, 3],
+            bitmap: Some(Bitmap {
+                bits: vec![1, 1, 1, 1, 1, 1],
+            }),
         };
 
         let b = BucketColumn::from_hash(hash, 2);
         let bmap = BucketsSizeMap::from_bucket_column(b, 2);
-        let part = data.partition_column(&bmap);
+        let part = data.partition_column(&None, &None, &bmap);
 
-        let hash = HashColumn { data, index: None };
+        let hash = HashColumn { data, bitmap: None };
 
-        let hash = hash.data.partition_column(&bmap);
-        let hash = if let PartitionedColumn::FixedLenType(hash_inner) = hash {
+        let hash = hash.data.partition_column(&None, &None, &bmap);
+
+        let hash = if let PartitionedColumn::FixedLenType(hash_inner, index, bitmap) = hash {
             hash_inner
         } else {
             panic!()
         };
+
+        assert_eq!(hash, vec![vec![1], vec![2, 4, 6, 8], vec![], vec![10]]);
+
         let index = hash.iter().map(|_| None).collect();
-        let hash: HashColumnPartitioned = HashColumnPartitioned { data: hash, index };
+        let bitmap = hash.iter().map(|_| None).collect();
+        let hash: HashColumnPartitioned = HashColumnPartitioned {
+            data: hash,
+            index,
+            bitmap,
+        };
 
         let b = BucketColumnPartitioned::from_hash(hash, 2);
+
         let mut bmap = BucketsSizeMapPartitioned::from_bucket_column(b);
 
         let new_index = bmap
@@ -294,7 +348,7 @@ mod tests {
             .enumerate()
             .map(|(i, v)| {
                 if i & 2 == 0 {
-                    Some((0..v.len()).map(Some).collect())
+                    Some((0..v.len()).collect())
                 } else {
                     None
                 }
@@ -303,13 +357,43 @@ mod tests {
 
         bmap.hash.index = new_index;
 
+        let bitmap = vec![
+            None,
+            Some(Bitmap {
+                bits: vec![1, 1, 0, 1],
+            }),
+            None,
+            None,
+        ];
+
+        let part = match part {
+            PartitionedColumn::FixedLenType(column_data, index, _) => {
+                PartitionedColumn::FixedLenType(column_data, index, bitmap)
+            }
+            _ => panic!(),
+        };
+
         println!("{:?}", part);
+
         let part = part.partition_column(&bmap);
         println!("{:?}", part);
 
+        //assert_eq!(hash, vec![vec![1], vec![2, 4, 6, 8], vec![], vec![10]]);
+        //FixedLenType([[1], [2, 4, 6, 8], [], [10]], [None, None, None, None], [None, None, None, None])
         assert_eq!(
             part,
-            PartitionedColumn::FixedLenType(vec![vec![8], vec![2, 10], vec![4], vec![6]])
+            PartitionedColumn::FixedLenType(
+                vec![vec![4, 8], vec![1], vec![2, 6, 10], vec![]],
+                vec![None, None, None, None],
+                vec![
+                    Some(Bitmap { bits: vec![1, 1] }),
+                    Some(Bitmap { bits: vec![1] }),
+                    Some(Bitmap {
+                        bits: vec![1, 0, 1]
+                    }),
+                    Some(Bitmap { bits: vec![] }),
+                ]
+            )
         );
     }
     #[test]
@@ -325,31 +409,38 @@ mod tests {
         let strvec = StringVec { strvec };
 
         let hash: HashColumn = HashColumn {
-            data: vec![8, 2, 2, 2, 2, 6],
-            index: Some(vec![Some(0), Some(1), Some(2), Some(3), Some(4), Some(5)]),
+            data: vec![4, 1, 1, 1, 1, 3],
+            bitmap: Some(Bitmap {
+                bits: vec![1, 1, 1, 1, 1, 1],
+            }),
         };
 
         let b = BucketColumn::from_hash(hash, 2);
         let bmap = BucketsSizeMap::from_bucket_column(b, 2);
-        let part = strvec.partition_column(&bmap);
+        let part = strvec.partition_column(&None, &None, &bmap);
 
         let data: Vec<u64> = vec![1, 2, 4, 6, 8, 10];
-        let hash = HashColumn { data, index: None };
+        let hash = HashColumn { data, bitmap: None };
 
-        let hash = hash.data.partition_column(&bmap);
-        let hash = if let PartitionedColumn::FixedLenType(hash_inner) = hash {
+        let hash = hash.data.partition_column(&None, &None, &bmap);
+        let hash = if let PartitionedColumn::FixedLenType(hash_inner, index, bitmap) = hash {
             hash_inner
         } else {
             panic!()
         };
 
         let index = hash.iter().map(|_| None).collect();
-        let hash: HashColumnPartitioned = HashColumnPartitioned { data: hash, index };
+        let bitmap = hash.iter().map(|_| None).collect();
+        let hash: HashColumnPartitioned = HashColumnPartitioned {
+            data: hash,
+            index,
+            bitmap,
+        };
 
         let b = BucketColumnPartitioned::from_hash(hash, 2);
         let mut bmap = BucketsSizeMapPartitioned::from_bucket_column(b);
 
-        let part = if let PartitionedColumn::VariableLenType(part_inner) = part {
+        let part = if let PartitionedColumn::VariableLenType(part_inner, index, bitmap) = part {
             part_inner
         } else {
             panic!()
@@ -361,7 +452,7 @@ mod tests {
             .enumerate()
             .map(|(i, v)| {
                 if i & 2 == 0 {
-                    Some((0..v.len()).map(Some).collect())
+                    Some((0..v.len()).collect())
                 } else {
                     None
                 }
@@ -369,32 +460,62 @@ mod tests {
             .collect();
 
         bmap.hash.index = new_index;
-        let part = PartitionedColumn::VariableLenType(part);
+        let bitmap = part.par_iter().map(|_| None).collect();
+        let index = part.par_iter().map(|_| None).collect();
+        let part: PartitionedColumn<String> =
+            PartitionedColumn::VariableLenType(part, index, bitmap);
+
+        let bitmap = vec![
+            None,
+            Some(Bitmap {
+                bits: vec![1, 1, 0, 1],
+            }),
+            None,
+            None,
+        ];
+
+        let part = match part {
+            PartitionedColumn::VariableLenType(columnu8_data, index, _) => {
+                PartitionedColumn::VariableLenType(columnu8_data, index, bitmap)
+            }
+            _ => panic!(),
+        };
 
         let part = part.partition_column(&bmap);
 
-        let expected_result = PartitionedColumn::<String>::VariableLenType(vec![
-            ColumnU8 {
-                data: vec![101, 101],
-                start_pos: vec![0],
-                len: vec![2],
-            },
-            ColumnU8 {
-                data: vec![98, 98, 102, 102, 102],
-                start_pos: vec![0, 2],
-                len: vec![2, 3],
-            },
-            ColumnU8 {
-                data: vec![99, 99],
-                start_pos: vec![0],
-                len: vec![2],
-            },
-            ColumnU8 {
-                data: vec![100, 100],
-                start_pos: vec![0],
-                len: vec![2],
-            },
-        ]);
+        let expected_result = PartitionedColumn::<String>::VariableLenType(
+            vec![
+                ColumnU8 {
+                    data: vec![99, 99, 101, 101],
+                    start_pos: vec![0, 2],
+                    len: vec![2, 2],
+                },
+                ColumnU8 {
+                    data: vec![97, 97],
+                    start_pos: vec![0],
+                    len: vec![2],
+                },
+                ColumnU8 {
+                    data: vec![98, 98, 100, 100, 102, 102, 102],
+                    start_pos: vec![0, 2, 4],
+                    len: vec![2, 2, 3],
+                },
+                ColumnU8 {
+                    data: vec![],
+                    start_pos: vec![],
+                    len: vec![],
+                },
+            ],
+            vec![None, None, None, None],
+            vec![
+                Some(Bitmap { bits: vec![1, 1] }),
+                Some(Bitmap { bits: vec![1] }),
+                Some(Bitmap {
+                    bits: vec![1, 0, 1],
+                }),
+                Some(Bitmap { bits: vec![] }),
+            ],
+        );
         assert_eq!(part, expected_result);
     }
 
@@ -411,29 +532,23 @@ mod tests {
         let strvec = StringVec { strvec };
 
         let hash: HashColumn = HashColumn {
-            data: vec![8, 2, 2, 2, 2, 6],
-            index: Some(vec![Some(0), Some(1), Some(2), Some(3), Some(4), Some(5)]),
+            data: vec![4, 1, 1, 1, 1, 3],
+            bitmap: Some(Bitmap {
+                bits: vec![1, 1, 1, 1, 1, 1],
+            }),
         };
 
         let b = BucketColumn::from_hash(hash, 2);
         let bmap = BucketsSizeMap::from_bucket_column(b, 2);
 
         //This gives column with elements per chunk 1 4 0 1
-        let part = strvec.partition_column(&bmap);
+        let part = strvec.partition_column(&None, &None, &bmap);
 
-        let index = vec![
-            None,
-            Some(vec![Some(0), Some(0)]),
-            None,
-            Some(vec![Some(0)]),
-        ];
+        let index = vec![None, Some(vec![0, 0]), None, Some(vec![0])];
 
         let flattened_index = part.flatten_index(&index);
 
-        assert_eq!(
-            flattened_index.index_flattened,
-            Some(vec![Some(0), Some(1), Some(1), Some(2)]),
-        );
+        assert_eq!(flattened_index.index_flattened, Some(vec![0, 1, 1, 2]),);
     }
 
     #[test]
@@ -441,22 +556,19 @@ mod tests {
         let data: Vec<u64> = vec![1, 2, 3, 4, 5, 6];
 
         let hash: HashColumn = HashColumn {
-            data: vec![8, 2, 2, 2, 2, 6],
-            index: Some(vec![Some(0), Some(1), Some(2), Some(3), Some(4), Some(5)]),
+            data: vec![4, 1, 1, 1, 1, 3],
+            bitmap: Some(Bitmap {
+                bits: vec![1, 1, 1, 1, 1, 1],
+            }),
         };
 
         let b = BucketColumn::from_hash(hash, 2);
         let bmap = BucketsSizeMap::from_bucket_column(b, 2);
 
         //This gives column with elements per chunk 1 4 0 1
-        let part = data.partition_column(&bmap);
+        let part = data.partition_column(&None, &None, &bmap);
 
-        let index = vec![
-            None,
-            Some(vec![Some(0), Some(0)]),
-            None,
-            Some(vec![Some(0)]),
-        ];
+        let index = vec![None, Some(vec![0, 0]), None, Some(vec![0])];
 
         let flattened_index = part.flatten_index(&index);
 
@@ -464,7 +576,7 @@ mod tests {
 
         assert_eq!(
             flattened_column,
-            FlattenedColumn::FixedLenType(vec![1, 2, 6])
+            FlattenedColumn::FixedLenType(vec![1, 2, 6], None)
         );
     }
 
@@ -481,22 +593,19 @@ mod tests {
         let strvec = StringVec { strvec };
 
         let hash: HashColumn = HashColumn {
-            data: vec![8, 2, 2, 2, 2, 6],
-            index: Some(vec![Some(0), Some(1), Some(2), Some(3), Some(4), Some(5)]),
+            data: vec![4, 1, 1, 1, 1, 3],
+            bitmap: Some(Bitmap {
+                bits: vec![1, 1, 1, 1, 1, 1],
+            }),
         };
 
         let b = BucketColumn::from_hash(hash, 2);
         let bmap = BucketsSizeMap::from_bucket_column(b, 2);
 
         //This gives column with elements per chunk 1 4 0 1
-        let part = strvec.partition_column(&bmap);
+        let part = strvec.partition_column(&None, &None, &bmap);
 
-        let index = vec![
-            None,
-            Some(vec![Some(0), Some(0)]),
-            None,
-            Some(vec![Some(0)]),
-        ];
+        let index = vec![None, Some(vec![0, 0]), None, Some(vec![0])];
 
         let flattened_index = part.flatten_index(&index);
 
@@ -504,11 +613,14 @@ mod tests {
 
         assert_eq!(
             flattened_column,
-            FlattenedColumn::VariableLenTypeU8(ColumnU8 {
-                data: vec![97, 97, 98, 98, 98, 102, 102],
-                start_pos: vec![0, 2, 5],
-                len: vec![2, 3, 2]
-            })
+            FlattenedColumn::VariableLenTypeU8(
+                ColumnU8 {
+                    data: vec![97, 97, 98, 98, 98, 102, 102],
+                    start_pos: vec![0, 2, 5],
+                    len: vec![2, 3, 2]
+                },
+                None
+            )
         )
     }
 
@@ -533,14 +645,14 @@ mod tests {
 
         let s = RandomState::new();
 
-        let hash = strvec.hash_column(&s, None);
+        let hash = strvec.hash_column(&None, &None, &s);
 
         let b = BucketColumn::from_hash(hash, 4);
         let bmap = BucketsSizeMap::from_bucket_column(b, 2);
 
-        let part = strvec.partition_column(&bmap);
+        let part = strvec.partition_column(&None, &None, &bmap);
         let part_index = match &part {
-            PartitionedColumn::VariableLenType(columnu8) => {
+            PartitionedColumn::VariableLenType(columnu8, index, bitmap) => {
                 let v: ColumnIndexPartitioned = columnu8.par_iter().map(|_| None).collect();
                 v
             }
@@ -555,7 +667,7 @@ mod tests {
         let flattened_column = part.flatten(&flattened_index);
 
         let (data, start_pos, len) = match flattened_column {
-            FlattenedColumn::VariableLenTypeU8(columnu8) => {
+            FlattenedColumn::VariableLenTypeU8(columnu8, None) => {
                 (columnu8.data, columnu8.start_pos, columnu8.len)
             }
             _ => panic!(),
@@ -594,14 +706,14 @@ mod tests {
 
         let s = RandomState::new();
 
-        let hash = strvec.hash_column(&s, None);
+        let hash = strvec.hash_column(&None, &None, &s);
 
         let b = BucketColumn::from_hash(hash, 10);
         let bmap = BucketsSizeMap::from_bucket_column(b, 2);
 
-        let part = strvec.partition_column(&bmap);
+        let part = strvec.partition_column(&None, &None, &bmap);
         let part_index = match &part {
-            PartitionedColumn::VariableLenType(columnu8) => {
+            PartitionedColumn::VariableLenType(columnu8, index, bitmap) => {
                 let v: ColumnIndexPartitioned = columnu8.par_iter().map(|_| None).collect();
                 v
             }
@@ -616,7 +728,7 @@ mod tests {
         let flattened_column = part.flatten(&flattened_index);
 
         let (data, start_pos, len) = match flattened_column {
-            FlattenedColumn::VariableLenTypeU8(columnu8) => {
+            FlattenedColumn::VariableLenTypeU8(columnu8, None) => {
                 (columnu8.data, columnu8.start_pos, columnu8.len)
             }
             _ => panic!(),
@@ -653,14 +765,14 @@ mod tests {
 
         let s = RandomState::new();
 
-        let hash = data.hash_column(&s, None);
+        let hash = data.hash_column(&None, &None, &s);
 
         let b = BucketColumn::from_hash(hash, 4);
         let bmap = BucketsSizeMap::from_bucket_column(b, 2);
 
-        let part = data.partition_column(&bmap);
+        let part = data.partition_column(&None, &None, &bmap);
         let part_index = match &part {
-            PartitionedColumn::FixedLenType(column) => {
+            PartitionedColumn::FixedLenType(column, index, bitmap) => {
                 let v: ColumnIndexPartitioned = column.par_iter().map(|_| None).collect();
                 v
             }
@@ -675,7 +787,7 @@ mod tests {
         let flattened_column = part.flatten(&flattened_index);
 
         let mut data = match flattened_column {
-            FlattenedColumn::FixedLenType(data) => data,
+            FlattenedColumn::FixedLenType(data, None) => data,
             _ => panic!(),
         };
 
@@ -687,6 +799,7 @@ mod tests {
 
     #[test]
     fn partial_sum_serial_test() {
+        use crate::helpers::*;
         let data: Vec<u64> = vec![1, 2, 3, 4, 5, 6, 7, 8];
         let result = partial_sum_serial(&data, 0);
         assert_eq!(result, vec![1, 3, 6, 10, 15, 21, 28, 36]);
@@ -698,6 +811,7 @@ mod tests {
 
     #[test]
     fn partial_sum_serial_assign_test() {
+        use crate::helpers::*;
         let mut data: Vec<u64> = vec![1, 2, 3, 4, 5, 6, 7, 8];
         partial_sum_serial_assign(&mut data, 0);
         assert_eq!(data, vec![1, 3, 6, 10, 15, 21, 28, 36]);
@@ -709,6 +823,7 @@ mod tests {
 
     #[test]
     fn partial_sum_serial_with_buffer_test() {
+        use crate::helpers::*;
         let data: Vec<u64> = vec![1, 2, 3, 4, 5, 6, 7, 8];
         let mut result: Vec<u64> = vec![0; data.len()];
         partial_sum_serial_with_buffer(&data, &mut result, 0);
@@ -720,6 +835,7 @@ mod tests {
 
     #[test]
     fn partial_sum_parallel_test() {
+        use crate::helpers::*;
         let data: Vec<u64> = vec![1, 2, 3, 4, 5, 6, 7, 8];
         let result = partial_sum_parallel(&data, 0, std::num::NonZeroUsize::new(4).unwrap());
         assert_eq!(result, vec![1, 3, 6, 10, 15, 21, 28, 36]);
@@ -731,6 +847,7 @@ mod tests {
 
     #[test]
     fn prefix_sum_parallel_serial_equal() {
+        use crate::helpers::*;
         use rand::distributions::Standard;
         use rand::prelude::*;
 
@@ -753,15 +870,15 @@ mod tests {
         assert_eq!(res_serial, res_parallel);
     }
     #[test]
-    fn hash_to_bucket_no_indexes() {
+    fn hash_to_bucket() {
         let hash_left: HashColumn = HashColumn {
             data: vec![2, 6, 4, 1, 8, 8, 8, 10],
-            index: None,
+            bitmap: None,
         };
 
         let hash_right: HashColumn = HashColumn {
             data: vec![2, 4, 6, 8, 3, 8],
-            index: None,
+            bitmap: None,
         };
 
         let (left_index, right_index) = hash_join(&hash_left, &hash_right, 2);
@@ -772,120 +889,6 @@ mod tests {
             .zip(right_index.iter())
             .map(|(left_i, right_i)| {
                 assert_eq!(hash_left.data[*left_i], hash_right.data[*right_i]);
-                (*left_i, *right_i)
-            })
-            .collect();
-        index_combined.par_sort_unstable();
-        let len_before_dedup = index_combined.len();
-        index_combined.dedup();
-        assert_eq!(len_before_dedup, index_combined.len());
-    }
-    #[test]
-    fn hash_to_bucket_index_left() {
-        let hash_left: HashColumn = HashColumn {
-            data: vec![2, 6, 4, 1, 8, 8, 8, 10],
-            index: Some(vec![
-                Some(7),
-                Some(6),
-                Some(5),
-                Some(4),
-                Some(3),
-                Some(2),
-                Some(1),
-                Some(0),
-            ]),
-        };
-
-        let hash_right: HashColumn = HashColumn {
-            data: vec![2, 4, 6, 8, 3, 8],
-            index: None,
-        };
-
-        let (left_index, right_index) = hash_join(&hash_left, &hash_right, 2);
-        assert_eq!(left_index.len(), 9);
-        assert_eq!(right_index.len(), 9);
-        let mut index_combined: Vec<(usize, usize)> = left_index
-            .iter()
-            .zip(right_index.iter())
-            .map(|(left_i, right_i)| {
-                let left_index = (&hash_left.index.clone().unwrap())[*left_i].unwrap();
-                let value_left = hash_left.data[left_index];
-                let value_right = hash_right.data[*right_i];
-                assert_eq!(value_left, value_right);
-                (*left_i, *right_i)
-            })
-            .collect();
-        index_combined.par_sort_unstable();
-        let len_before_dedup = index_combined.len();
-        index_combined.dedup();
-        assert_eq!(len_before_dedup, index_combined.len());
-    }
-
-    #[test]
-    fn hash_to_bucket_index_right() {
-        let hash_left: HashColumn = HashColumn {
-            data: vec![2, 6, 4, 1, 8, 8, 8, 10],
-            index: None,
-        };
-
-        let hash_right: HashColumn = HashColumn {
-            data: vec![2, 4, 6, 8, 3, 8],
-            index: Some(vec![Some(5), Some(4), Some(3), Some(2), Some(1), Some(0)]),
-        };
-
-        let (left_index, right_index) = hash_join(&hash_left, &hash_right, 2);
-        assert_eq!(left_index.len(), 9);
-        assert_eq!(right_index.len(), 9);
-        let mut index_combined: Vec<(usize, usize)> = left_index
-            .iter()
-            .zip(right_index.iter())
-            .map(|(left_i, right_i)| {
-                let right_index = (&hash_right.index.clone().unwrap())[*right_i].unwrap();
-                let value_right = hash_right.data[right_index];
-                let value_left = hash_left.data[*left_i];
-                assert_eq!(value_left, value_right);
-                (*left_i, *right_i)
-            })
-            .collect();
-        index_combined.par_sort_unstable();
-        let len_before_dedup = index_combined.len();
-        index_combined.dedup();
-        assert_eq!(len_before_dedup, index_combined.len());
-    }
-
-    #[test]
-    fn hash_to_bucket_index_both() {
-        let hash_left: HashColumn = HashColumn {
-            data: vec![2, 6, 4, 1, 8, 8, 8, 10],
-            index: Some(vec![
-                Some(7),
-                Some(6),
-                Some(5),
-                Some(4),
-                Some(3),
-                Some(2),
-                Some(1),
-                Some(0),
-            ]),
-        };
-
-        let hash_right: HashColumn = HashColumn {
-            data: vec![2, 4, 6, 8, 3, 8],
-            index: Some(vec![Some(5), Some(4), Some(3), Some(2), Some(1), Some(0)]),
-        };
-
-        let (left_index, right_index) = hash_join(&hash_left, &hash_right, 2);
-        assert_eq!(left_index.len(), 9);
-        assert_eq!(right_index.len(), 9);
-        let mut index_combined: Vec<(usize, usize)> = left_index
-            .iter()
-            .zip(right_index.iter())
-            .map(|(left_i, right_i)| {
-                let right_index = (&hash_right.index.clone().unwrap())[*right_i].unwrap();
-                let value_right = hash_right.data[right_index];
-                let left_index = (&hash_left.index.clone().unwrap())[*left_i].unwrap();
-                let value_left = hash_left.data[left_index];
-                assert_eq!(value_left, value_right);
                 (*left_i, *right_i)
             })
             .collect();
