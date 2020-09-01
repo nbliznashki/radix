@@ -44,14 +44,14 @@ fn prep_data(sample_size: usize, max_str_len: usize) -> StringVec {
 fn performance_test(strvec: &StringVec) {
     let s = RandomState::new();
 
-    let hash = strvec.hash_column(&s, None);
+    let hash = strvec.hash_column(&None, &None, &s);
 
     let b = BucketColumn::from_hash(hash, 10);
     let bmap = BucketsSizeMap::from_bucket_column(b, 2);
 
-    let part = strvec.partition_column(&bmap);
+    let part = strvec.partition_column(&None, &None, &bmap);
     let part_index = match &part {
-        PartitionedColumn::VariableLenType(columnu8) => {
+        PartitionedColumn::VariableLenType(columnu8, _, _) => {
             let v: ColumnIndexPartitioned = columnu8.par_iter().map(|_| None).collect();
             v
         }
@@ -64,43 +64,11 @@ fn performance_test(strvec: &StringVec) {
     let flattened_index = part.flatten_index(&part_index);
 
     let flattened_column = part.flatten(&flattened_index);
+    //TO-DO
     match flattened_column {
-        FlattenedColumn::FixedLenType(_) => panic![],
+        FlattenedColumn::FixedLenType(_, _) => panic![],
         _ => {}
     };
-}
-
-fn prefix_sum(c: &mut Criterion) {
-    use rand::distributions::Standard;
-    use rand::prelude::*;
-    use rayon::prelude::*;
-
-    let input: Vec<u64> = (0..100_000_000usize)
-        .into_par_iter()
-        .map(|_| {
-            let mut s: Vec<u32> = thread_rng().sample_iter(&Standard).take(1).collect();
-            s.pop().unwrap() as u64
-        })
-        .collect();
-
-    let mut output = vec![0; input.len()];
-
-    let mut group = c.benchmark_group("Prefix Sum");
-    group.bench_function("Prefix Sum Serial", |b| {
-        b.iter(|| partial_sum_serial_with_buffer(&input, &mut output, 0))
-    });
-    group.bench_function("Prefix Sum Parallel", |b| {
-        b.iter(|| {
-            partial_sum_parallel_with_buffer(
-                &input,
-                &mut output,
-                0,
-                std::num::NonZeroUsize::new(32).unwrap(),
-            )
-        })
-    });
-
-    group.finish();
 }
 
 criterion_group!(benches, partition_and_flatten);
