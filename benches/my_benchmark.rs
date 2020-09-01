@@ -64,7 +64,7 @@ fn performance_test(strvec: &StringVec) {
     let flattened_index = part.flatten_index(&part_index);
 
     let flattened_column = part.flatten(&flattened_index);
-    //TO-DO
+    //TO-DO - do what clippy says
     match flattened_column {
         FlattenedColumn::FixedLenType(_, _) => panic![],
         _ => {}
