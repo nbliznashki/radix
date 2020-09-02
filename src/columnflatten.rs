@@ -1,9 +1,6 @@
-use crate::bucketcolumn::*;
 use crate::columnu8::*;
-use crate::hashcolumn::*;
 use rayon::prelude::*;
 use std::cell::UnsafeCell;
-use std::hash::{BuildHasher, Hash, Hasher};
 use std::mem::{self, MaybeUninit};
 
 pub trait ColumnFlatten<T> {
@@ -31,10 +28,10 @@ impl<T> ColumnFlatten<T> for PartitionedColumn<T> {
         T: Send + Sync,
     {
         let data_chunks_len: Vec<usize> = match &self {
-            PartitionedColumn::FixedLenType(column_data) => {
+            PartitionedColumn::FixedLenType(column_data, _index, _bitmap) => {
                 column_data.par_iter().map(|v| (v.len())).collect()
             }
-            PartitionedColumn::VariableLenType(columnu8_data) => {
+            PartitionedColumn::VariableLenType(columnu8_data, _index, _bitmap) => {
                 columnu8_data.par_iter().map(|v| (v.len.len())).collect()
             }
         };
@@ -74,11 +71,7 @@ impl<T> ColumnFlatten<T> for PartitionedColumn<T> {
                 .par_iter()
                 .map(|index_part| match index_part {
                     Some(index_part) => {
-                        let mut v_clone: Vec<usize> = index_part
-                            .iter()
-                            .filter(|i| i.is_some())
-                            .map(|i| i.unwrap())
-                            .collect();
+                        let mut v_clone: Vec<usize> = index_part.iter().copied().collect();
                         v_clone.sort();
 
                         let mut current_val = usize::MAX;
@@ -173,18 +166,19 @@ impl<T> ColumnFlatten<T> for PartitionedColumn<T> {
                         Some(index) => index.iter().enumerate().for_each(|(i, index_val)| unsafe {
                             (*unsafe_output)[i + *write_offset]
                                 .as_mut_ptr()
-                                .write(index_val.map(|i| i + addon))
+                                .write(index_val + addon)
                         }),
-                        None => (0..*write_len).into_iter().for_each(|i| unsafe {
+                        None => (0..*write_len).for_each(|i| unsafe {
                             (*unsafe_output)[i + *write_offset]
                                 .as_mut_ptr()
-                                .write(Some(i + addon))
+                                .write(i + addon)
                         }),
                     };
                 });
 
             let output = unsafe_output.data.into_inner();
             //SAFETY - ok to do asall fields of the vector should be populated
+            #[allow(clippy::unsound_collection_transmute)]
             let output: ColumnIndexUnwrapped =
                 unsafe { mem::transmute::<_, ColumnIndexUnwrapped>(output) };
 
@@ -248,7 +242,7 @@ impl<T> ColumnFlatten<T> for PartitionedColumn<T> {
         //Calculate add-on offsets
 
         match self {
-            PartitionedColumn::FixedLenType(column_data) => {
+            PartitionedColumn::FixedLenType(column_data, _index, _bitmap) => {
                 let mut output: Vec<MaybeUninit<T>> = Vec::with_capacity(indexmap.target_total_len);
 
                 unsafe { output.set_len(indexmap.target_total_len) };
@@ -290,9 +284,9 @@ impl<T> ColumnFlatten<T> for PartitionedColumn<T> {
                 let output = unsafe_output.data.into_inner();
                 //SAFETY - ok to do asall fields of the vector should be populated
                 let output: Vec<T> = unsafe { mem::transmute::<_, Vec<T>>(output) };
-                FlattenedColumn::FixedLenType(output)
+                FlattenedColumn::FixedLenType(output, None)
             }
-            PartitionedColumn::VariableLenType(columnu8_data) => {
+            PartitionedColumn::VariableLenType(columnu8_data, _index, _bitmap) => {
                 //
                 //
                 //STEP 1 - Derive the flattened len vector
@@ -405,7 +399,7 @@ impl<T> ColumnFlatten<T> for PartitionedColumn<T> {
                     );
 
                 let flattened_start_pos = unsafe_flattened_start_pos.data.into_inner();
-                //SAFETY - ok to do asall fields of the vector should be populated
+                //SAFETY - ok to do as all fields of the vector should be populated
                 let flattened_start_pos: Vec<usize> =
                     unsafe { mem::transmute::<_, Vec<usize>>(flattened_start_pos) };
 
@@ -417,8 +411,7 @@ impl<T> ColumnFlatten<T> for PartitionedColumn<T> {
                 let total_len: usize = flattened_start_pos.iter().rev().take(1).sum::<usize>()
                     + flattened_len.iter().rev().take(1).sum::<usize>();
 
-                let mut flattened_data: Vec<MaybeUninit<u8>> =
-                    Vec::with_capacity(indexmap.target_total_len);
+                let mut flattened_data: Vec<MaybeUninit<u8>> = Vec::with_capacity(total_len);
 
                 unsafe { flattened_data.set_len(total_len) };
 
@@ -450,12 +443,11 @@ impl<T> ColumnFlatten<T> for PartitionedColumn<T> {
                                 });
                             });
                         } else {
-                            let target_write_pos = flattened_start_pos[*target_write_offset];
                             let slice_to_write = data_chunk.data.as_slice();
 
                             slice_to_write.iter().enumerate().for_each(|(i, d)| {
                                 unsafe {
-                                    (*unsafe_output)[i + target_write_pos]
+                                    (*unsafe_output)[i + flattened_start_pos[*target_write_offset]]
                                         .as_mut_ptr()
                                         .write(*d);
                                 };
@@ -465,14 +457,18 @@ impl<T> ColumnFlatten<T> for PartitionedColumn<T> {
 
                 let flattened_data = unsafe_flattened_data.data.into_inner();
                 //SAFETY - ok to do asall fields of the vector should be populated
+                #[allow(clippy::unsound_collection_transmute)]
                 let flattened_data: Vec<u8> =
                     unsafe { mem::transmute::<_, Vec<u8>>(flattened_data) };
 
-                FlattenedColumn::VariableLenTypeU8(ColumnU8 {
-                    data: flattened_data,
-                    start_pos: flattened_start_pos,
-                    len: flattened_len,
-                })
+                FlattenedColumn::VariableLenTypeU8(
+                    ColumnU8 {
+                        data: flattened_data,
+                        start_pos: flattened_start_pos,
+                        len: flattened_len,
+                    },
+                    None,
+                )
             }
         }
     }
