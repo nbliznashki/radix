@@ -1,20 +1,24 @@
 mod bitmap;
 mod bucketcolumn;
+mod column;
 mod columnflatten;
 mod columnpartition;
 mod columnrepartition;
 mod columnu8;
+mod expressions;
 mod hashcolumn;
 mod hashjoin;
 mod helpers;
 mod operations;
 
 pub use bucketcolumn::*;
+pub use column::*;
 pub use columnflatten::*;
 pub use columnpartition::*;
 pub use columnrepartition::*;
 pub use columnu8::*;
 pub use hashjoin::*;
+pub use operations::*;
 //TO-DO: Make library safe (e.g.) safe rust code outside of it can't cause UB
 
 #[cfg(test)]
@@ -23,6 +27,12 @@ mod tests {
     use crate::bucketcolumn::*;
     use crate::columnu8::*;
     use crate::hashcolumn::*;
+    use core::ops::AddAssign;
+    use core::ops::Deref;
+    use core::ops::DerefMut;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    #[macro_use]
     use crate::*;
 
     use std::collections::hash_map::RandomState;
@@ -896,5 +906,140 @@ mod tests {
         let len_before_dedup = index_combined.len();
         index_combined.dedup();
         assert_eq!(len_before_dedup, index_combined.len());
+    }
+    #[test]
+    fn sig_macro() {
+        use crate::expressions::dictionary::*;
+        use std::any::{Any, TypeId};
+
+        let s = sig!["add"; u64; u64, u64, u64];
+        assert_eq!(s.input_len(), 3);
+
+        let s = sig!["add"; u64];
+        assert_eq!(s.input_len(), 0);
+
+        let s1 = sig!["add"; u64; u64, u64, u64];
+        let s2 = sig!["add"; u64; u64, u64, u64];
+        assert!(s1 == s2);
+
+        let s1 = sig!["add"; u64; u64, u64, u64];
+        let s2 = sig!["sub"; u64; u64, u64, u64];
+        assert!(s1 != s2);
+
+        let s1 = sig!["add"; u64; u64, u64, u64];
+        let s2 = sig!["add"; u32; u64, u64, u64];
+        assert!(s1 != s2);
+
+        let s1 = sig!["add"; u64; u64, u64, u64];
+        let s2 = sig!["add"; u64; u64, u64, u32];
+        assert!(s1 != s2);
+
+        let s1 = sig!["add"; u64; u64, u64, u64];
+        let s2 = sig!["add"; u64; u64, u64];
+        assert!(s1 != s2);
+    }
+
+    #[test]
+    fn basic_expression() {
+        use crate::column::*;
+        use crate::expressions::dictionary::*;
+        use std::any::{Any, TypeId};
+
+        fn columnadd<T1, U1, T2, U2, T3>(left: &mut U1, right: U2)
+        where
+            U1: DerefMut<Target = [T1]>,
+            U2: IndexedParallelIterator<Item = T3>,
+            T1: AddAssign,
+            T1: From<T2>,
+            T2: Copy,
+            T1: Send + Sync,
+            T3: Send + Sync,
+            T3: Deref<Target = T2>,
+        {
+            left.par_iter_mut()
+                .zip_eq(right.into_par_iter())
+                .for_each(|(l, r)| *l += T1::from(*r));
+        }
+
+        fn bitmap_and<U2, T3>(left: &mut Option<Bitmap>, right: U2)
+        where
+            U2: IndexedParallelIterator<Item = T3>,
+            T3: Send + Sync,
+            T3: Deref<Target = u8>,
+        {
+            if let Some(bitmap) = left {
+                bitmap
+                    .bits
+                    .par_iter_mut()
+                    .zip_eq(right.into_par_iter())
+                    .for_each(|(l, r)| *l &= (*r));
+            } else {
+                *left = Some(Bitmap {
+                    bits: right.into_par_iter().map(|i| *i).collect(),
+                });
+            }
+        }
+
+        fn columnadd_u64_u64(left: &mut dyn Any, right: Vec<&dyn Any>) {
+            let left_down = left.downcast_mut::<Arc<OwnedColumn<Vec<u64>>>>().unwrap();
+            let right_down = right[0].downcast_ref::<OwnedColumn<Vec<u64>>>().unwrap();
+            match &right_down.index() {
+                Some(ind) => {
+                    columnadd(
+                        Arc::get_mut(left_down).unwrap().col_mut(),
+                        ind.par_iter().map(|i| &right_down.col()[*i]),
+                    );
+                }
+                None => {
+                    columnadd(
+                        Arc::get_mut(left_down).unwrap().col_mut(),
+                        right_down.col().par_iter(),
+                    );
+                }
+            };
+
+            if let Some(bitmap_right) = &right_down.bitmap() {
+                match &right_down.index() {
+                    Some(ind) => {
+                        bitmap_and(
+                            Arc::get_mut(left_down).unwrap().bitmap_mut(),
+                            ind.par_iter().map(|i| &bitmap_right.bits[*i]),
+                        );
+                    }
+                    None => {
+                        bitmap_and(
+                            Arc::get_mut(left_down).unwrap().bitmap_mut(),
+                            bitmap_right.bits.par_iter(),
+                        );
+                    }
+                };
+            }
+        }
+
+        let s = sig!["add"; OwnedColumn<Vec<u64>>; RefColumn<Vec<u64>>];
+
+        let mut dict: Dictionary = HashMap::new();
+        dict.insert(s.clone(), columnadd_u64_u64);
+
+        let mut col1: Arc<OwnedColumn<Vec<u64>>> =
+            Arc::new(OwnedColumn::new(vec![1, 2, 3], None, None));
+
+        let col2_data = vec![1, 3, 3];
+        let col2: OwnedColumn<Vec<u64>> = OwnedColumn::new(col2_data, None, None);
+        let col3: OwnedColumn<Vec<u64>> = OwnedColumn::new(vec![1, 3, 3], None, None);
+
+        let expr: Expression =
+            Expression::new(s.clone(), Binding::OwnedColumn, vec![Binding::RefColumn]);
+        let expr: Expression =
+            Expression::new(s, Binding::Expr(Box::new(expr)), vec![Binding::RefColumn]);
+        expr.eval(
+            &mut vec![&mut col1],
+            &mut vec![&col2, &col3],
+            &mut vec![],
+            &dict,
+        );
+
+        assert_eq!(col1.col(), &[3, 8, 9]);
+        drop(col2);
     }
 }

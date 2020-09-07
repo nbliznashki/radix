@@ -25,7 +25,7 @@ pub fn hash_join(
             .iter()
             .enumerate()
             .filter(|(_, value)| *value & 1 == 0)
-            .map(|(i, value)| (i + 1, value >> (num_bits_to_shift + 1)))
+            .map(|(i, value)| (i + 1, value >> (num_bits_to_shift)))
             .for_each(|(i, value)| {
                 let bucket_id = (value as usize) & (buckets_num - 1);
                 vlink[i] = vhash[bucket_id];
@@ -42,7 +42,7 @@ pub fn hash_join(
                 .iter()
                 .enumerate()
                 .filter(|(_, value)| *value & 1 == 0)
-                .map(|(i, value)| (i + 1, value, value >> (num_bits_to_shift + 1)))
+                .map(|(i, value)| (i + 1, value, value >> (num_bits_to_shift)))
                 .for_each(|(i, value_orig, value)| {
                     let bucket_id = (value as usize) & (buckets_num - 1);
                     let reference_index = vhash[bucket_id];
