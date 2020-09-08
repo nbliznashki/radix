@@ -1,5 +1,5 @@
 use crate::bitmap::*;
-use std::ops::Deref;
+use std::{ops::Deref, rc::Rc};
 pub trait Column<V> {
     fn col(&self) -> &V;
     fn index(&self) -> &Option<Vec<usize>>;
@@ -10,8 +10,9 @@ pub trait ColumnMut<V>: Column<V> {
     fn col_mut(&mut self) -> &mut V;
     fn index_mut(&mut self) -> &mut Option<Vec<usize>>;
     fn bitmap_mut(&mut self) -> &mut Option<Bitmap>;
+    fn all_mut(&mut self) -> (&mut V, &mut Option<Vec<usize>>, &mut Option<Bitmap>);
 }
-
+#[derive(Clone)]
 pub struct OwnedColumn<V> {
     col: V,
     index: Option<Vec<usize>>,
@@ -54,6 +55,9 @@ impl<V> ColumnMut<V> for OwnedColumn<V> {
     fn bitmap_mut(&mut self) -> &mut Option<Bitmap> {
         &mut self.bitmap
     }
+    fn all_mut(&mut self) -> (&mut V, &mut Option<Vec<usize>>, &mut Option<Bitmap>) {
+        (&mut self.col, &mut self.index, &mut self.bitmap)
+    }
 }
 
 pub struct RefColumn<V: 'static> {
@@ -71,6 +75,30 @@ impl<V> Column<V> for RefColumn<V> {
     }
     fn bitmap(&self) -> &Option<Bitmap> {
         self.bitmap
+    }
+}
+
+impl<T> Column<Vec<T>> for Vec<T> {
+    fn col(&self) -> &Vec<T> {
+        &self
+    }
+    fn index(&self) -> &Option<Vec<usize>> {
+        &None
+    }
+    fn bitmap(&self) -> &Option<Bitmap> {
+        &None
+    }
+}
+
+impl<T> Column<Vec<T>> for Rc<Vec<T>> {
+    fn col(&self) -> &Vec<T> {
+        &(**self)
+    }
+    fn index(&self) -> &Option<Vec<usize>> {
+        &None
+    }
+    fn bitmap(&self) -> &Option<Bitmap> {
+        &None
     }
 }
 

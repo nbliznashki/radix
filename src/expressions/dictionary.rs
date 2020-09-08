@@ -1,7 +1,7 @@
-use crate::expressions::operation::*;
-
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
+
+pub type Operation = fn(&mut dyn Any, Vec<&dyn Any>);
 
 pub type Dictionary = HashMap<Signature, Operation>;
 
@@ -46,7 +46,6 @@ impl Signature {
 
 #[macro_export]
 macro_rules! sig {
-
     ($elem:expr; $output:ty) => (
         Signature::new(
             $elem,
@@ -79,10 +78,7 @@ impl Expression {
         dict: &Dictionary,
     ) {
         let output: &mut dyn Any = match &self.output {
-            Binding::OwnedColumn => {
-                let v = owned_columns.pop().unwrap();
-                v
-            }
+            Binding::OwnedColumn => owned_columns.pop().unwrap(),
             Binding::Expr(expr) => {
                 (*expr).eval_recursive(owned_columns, ref_columns, const_values, dict);
                 owned_columns.pop().unwrap()
@@ -116,7 +112,7 @@ impl Expression {
         const_values: &mut Vec<&dyn Any>,
         dict: &Dictionary,
     ) {
-        &self.eval_recursive(owned_columns, ref_columns, const_values, dict);
+        self.eval_recursive(owned_columns, ref_columns, const_values, dict);
         assert_eq!(owned_columns.len(), 1);
     }
 }

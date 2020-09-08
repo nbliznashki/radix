@@ -1,3 +1,5 @@
-
 pub mod dictionary;
-pub mod operation;
+pub mod operations;
+
+pub use dictionary::*;
+pub use operations::*;

@@ -9,7 +9,6 @@ mod expressions;
 mod hashcolumn;
 mod hashjoin;
 mod helpers;
-mod operations;
 
 pub use bucketcolumn::*;
 pub use column::*;
@@ -17,8 +16,8 @@ pub use columnflatten::*;
 pub use columnpartition::*;
 pub use columnrepartition::*;
 pub use columnu8::*;
+pub use expressions::*;
 pub use hashjoin::*;
-pub use operations::*;
 //TO-DO: Make library safe (e.g.) safe rust code outside of it can't cause UB
 
 #[cfg(test)]
@@ -26,14 +25,10 @@ mod tests {
     use crate::bitmap::*;
     use crate::bucketcolumn::*;
     use crate::columnu8::*;
+    //use crate::expressions::operations::init_dict;
     use crate::hashcolumn::*;
-    use core::ops::AddAssign;
-    use core::ops::Deref;
-    use core::ops::DerefMut;
-    use std::collections::HashMap;
-    use std::sync::Arc;
-    #[macro_use]
     use crate::*;
+    use std::{any::Any, collections::HashMap, sync::Arc};
 
     use std::collections::hash_map::RandomState;
     use std::rc::*;
@@ -909,8 +904,7 @@ mod tests {
     }
     #[test]
     fn sig_macro() {
-        use crate::expressions::dictionary::*;
-        use std::any::{Any, TypeId};
+        use std::any::TypeId;
 
         let s = sig!["add"; u64; u64, u64, u64];
         assert_eq!(s.input_len(), 3);
@@ -940,106 +934,50 @@ mod tests {
     }
 
     #[test]
-    fn basic_expression() {
+    fn basic_expression_2() {
         use crate::column::*;
-        use crate::expressions::dictionary::*;
-        use std::any::{Any, TypeId};
-
-        fn columnadd<T1, U1, T2, U2, T3>(left: &mut U1, right: U2)
-        where
-            U1: DerefMut<Target = [T1]>,
-            U2: IndexedParallelIterator<Item = T3>,
-            T1: AddAssign,
-            T1: From<T2>,
-            T2: Copy,
-            T1: Send + Sync,
-            T3: Send + Sync,
-            T3: Deref<Target = T2>,
-        {
-            left.par_iter_mut()
-                .zip_eq(right.into_par_iter())
-                .for_each(|(l, r)| *l += T1::from(*r));
-        }
-
-        fn bitmap_and<U2, T3>(left: &mut Option<Bitmap>, right: U2)
-        where
-            U2: IndexedParallelIterator<Item = T3>,
-            T3: Send + Sync,
-            T3: Deref<Target = u8>,
-        {
-            if let Some(bitmap) = left {
-                bitmap
-                    .bits
-                    .par_iter_mut()
-                    .zip_eq(right.into_par_iter())
-                    .for_each(|(l, r)| *l &= (*r));
-            } else {
-                *left = Some(Bitmap {
-                    bits: right.into_par_iter().map(|i| *i).collect(),
-                });
-            }
-        }
-
-        fn columnadd_u64_u64(left: &mut dyn Any, right: Vec<&dyn Any>) {
-            let left_down = left.downcast_mut::<Arc<OwnedColumn<Vec<u64>>>>().unwrap();
-            let right_down = right[0].downcast_ref::<OwnedColumn<Vec<u64>>>().unwrap();
-            match &right_down.index() {
-                Some(ind) => {
-                    columnadd(
-                        Arc::get_mut(left_down).unwrap().col_mut(),
-                        ind.par_iter().map(|i| &right_down.col()[*i]),
-                    );
-                }
-                None => {
-                    columnadd(
-                        Arc::get_mut(left_down).unwrap().col_mut(),
-                        right_down.col().par_iter(),
-                    );
-                }
-            };
-
-            if let Some(bitmap_right) = &right_down.bitmap() {
-                match &right_down.index() {
-                    Some(ind) => {
-                        bitmap_and(
-                            Arc::get_mut(left_down).unwrap().bitmap_mut(),
-                            ind.par_iter().map(|i| &bitmap_right.bits[*i]),
-                        );
-                    }
-                    None => {
-                        bitmap_and(
-                            Arc::get_mut(left_down).unwrap().bitmap_mut(),
-                            bitmap_right.bits.par_iter(),
-                        );
-                    }
-                };
-            }
-        }
-
-        let s = sig!["add"; OwnedColumn<Vec<u64>>; RefColumn<Vec<u64>>];
+        use std::any::TypeId;
 
         let mut dict: Dictionary = HashMap::new();
-        dict.insert(s.clone(), columnadd_u64_u64);
+        init_dict(&mut dict);
 
-        let mut col1: Arc<OwnedColumn<Vec<u64>>> =
-            Arc::new(OwnedColumn::new(vec![1, 2, 3], None, None));
+        let s = sig!["+="; OwnedColumn<Vec<u64>>;Vec<u64>];
 
-        let col2_data = vec![1, 3, 3];
-        let col2: OwnedColumn<Vec<u64>> = OwnedColumn::new(col2_data, None, None);
-        let col3: OwnedColumn<Vec<u64>> = OwnedColumn::new(vec![1, 3, 3], None, None);
+        let col1: OwnedColumn<Vec<u64>> = OwnedColumn::new(
+            vec![1, 2, 3],
+            None,
+            Some(Bitmap {
+                bits: vec![1, 0, 1],
+            }),
+        );
+
+        let mut col1: Vec<Arc<OwnedColumn<Vec<u64>>>> =
+            vec![Arc::new(col1.clone()), Arc::new(col1.clone())];
+        let col2: Vec<Arc<Vec<u64>>> = vec![Arc::new(vec![1, 3, 3]), Arc::new(vec![1, 3, 3])];
+        let col3: Vec<Arc<Vec<u64>>> = vec![Arc::new(vec![4, 5, 6]), Arc::new(vec![4, 5, 6])];
 
         let expr: Expression =
             Expression::new(s.clone(), Binding::OwnedColumn, vec![Binding::RefColumn]);
         let expr: Expression =
             Expression::new(s, Binding::Expr(Box::new(expr)), vec![Binding::RefColumn]);
-        expr.eval(
-            &mut vec![&mut col1],
-            &mut vec![&col2, &col3],
-            &mut vec![],
-            &dict,
-        );
+        col1.par_iter_mut()
+            .zip_eq(col2.par_iter())
+            .zip_eq(col3.par_iter())
+            .for_each(|((c1, c2), c3)| {
+                let col1_refmut: &mut OwnedColumn<Vec<u64>> = Arc::get_mut(c1).unwrap();
+                let col2_ref: &Vec<u64> = &(**c2);
+                let col3_ref: &Vec<u64> = &(**c3);
+                expr.eval(
+                    &mut vec![col1_refmut],
+                    &mut vec![col2_ref, col3_ref],
+                    &mut vec![],
+                    &dict,
+                );
+            });
 
-        assert_eq!(col1.col(), &[3, 8, 9]);
         drop(col2);
+
+        assert_eq!(col1[0].col(), &[6, 2, 12]);
+        assert_eq!(col1[0].bitmap().as_ref().unwrap().bits, &[1, 0, 1]);
     }
 }
