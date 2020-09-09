@@ -1,11 +1,14 @@
-use crate::expressions::dictionary::Dictionary;
+use crate::expressions::initdictionary::InitDictionary;
+use crate::expressions::opdictionary::OpDictionary;
 
+pub mod add;
 pub mod addassign;
 pub mod addhash;
 pub mod mulassign;
 
-pub fn init_dict(dict: &mut Dictionary) {
-    addassign::init_dict(dict);
-    mulassign::init_dict(dict);
-    addhash::init_dict(dict);
+pub fn load_op_dict(dict: &mut OpDictionary) {
+    addassign::load_op_dict(dict);
+    mulassign::load_op_dict(dict);
+    addhash::load_op_dict(dict);
+    add::load_op_dict(dict);
 }

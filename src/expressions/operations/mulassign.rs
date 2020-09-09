@@ -1,6 +1,4 @@
 use crate::bitmap::Bitmap;
-use crate::expressions::dictionary::Dictionary;
-use crate::expressions::dictionary::Signature;
 use crate::{Column, ColumnMut, OwnedColumn};
 use concat_idents::concat_idents;
 use core::any::{Any, TypeId};
@@ -28,13 +26,16 @@ macro_rules! binary_operation_impl {
     ($(($tl:ty, $tr:ty))+) => ($(
         concat_idents!(fn_name = mulassign, _, ownedcolumnvec,$tl,_,arcvec,$tr {
             #[allow(dead_code)]
-            fn fn_name(left: &mut dyn Any, right: Vec<&dyn Any>) {
+            fn fn_name(left: &mut dyn Any, right: Vec<InputTypes>) {
 
                 type T1=$tl;
                 type T2=$tr;
 
                 let down_left = left.downcast_mut::<OwnedColumn<Vec<T1>>>().unwrap();
-                let down_right = right[0].downcast_ref::<Arc<Vec<T2>>>().unwrap();
+                let down_right = match &right[0] {
+                    InputTypes::Ref(a)=>a.downcast_ref::<Vec<T2>>().unwrap(),
+                    InputTypes::Owned(a)=>a.downcast_ref::<Vec<T2>>().unwrap()
+                };
 
                 let (data_left, index_left, bitmap_left) = down_left.all_mut();
 
@@ -170,7 +171,7 @@ binary_operation_impl! {
 
 }
 
-pub(crate) fn init_dict(dict: &mut Dictionary) {
+pub(crate) fn load_op_dict(dict: &mut OpDictionary) {
     binary_operation_load! {dict;
             (u64, u64) (u64, u32) (u64, u16) (u64, u8) (u64, bool)
     };

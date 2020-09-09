@@ -28,7 +28,7 @@ mod tests {
     //use crate::expressions::operations::init_dict;
     use crate::hashcolumn::*;
     use crate::*;
-    use std::{any::Any, collections::HashMap, sync::Arc};
+    use std::{any::Any, collections::HashMap, ops::DerefMut, sync::Arc};
 
     use std::collections::hash_map::RandomState;
     use std::rc::*;
@@ -938,10 +938,10 @@ mod tests {
         use crate::column::*;
         use std::any::TypeId;
 
-        let mut dict: Dictionary = HashMap::new();
-        init_dict(&mut dict);
+        let mut dict: OpDictionary = HashMap::new();
+        load_op_dict(&mut dict);
 
-        let s = sig!["+="; OwnedColumn<Vec<u64>>;Vec<u64>];
+        let s = sig!["+="; OwnedColumn<Vec<u64>>;OwnedColumn<Vec<u64>>];
 
         let col1: OwnedColumn<Vec<u64>> = OwnedColumn::new(
             vec![1, 2, 3],
@@ -951,11 +951,22 @@ mod tests {
             }),
         );
 
-        let mut col1: Vec<Arc<OwnedColumn<Vec<u64>>>> =
-            vec![Arc::new(col1.clone()), Arc::new(col1.clone())];
-        let col2: Vec<Arc<Vec<u64>>> = vec![Arc::new(vec![1, 3, 3]), Arc::new(vec![1, 3, 3])];
-        let col3: Vec<Arc<Vec<u64>>> = vec![Arc::new(vec![4, 5, 6]), Arc::new(vec![4, 5, 6])];
-
+        let mut col1: Vec<Vec<Box<dyn Any + Send + Sync>>> = vec![
+            vec![Box::new(col1)],
+            vec![Box::new(OwnedColumn::<Vec<u64>>::new(
+                vec![1, 2, 3],
+                None,
+                None,
+            ))],
+        ];
+        let col2: Vec<Arc<OwnedColumn<Vec<u64>>>> = vec![
+            Arc::new(OwnedColumn::new(vec![1, 3, 3], None, None)),
+            Arc::new(OwnedColumn::new(vec![1, 3, 3], None, None)),
+        ];
+        let col3: Vec<Arc<OwnedColumn<Vec<u64>>>> = vec![
+            Arc::new(OwnedColumn::new(vec![4, 5, 6], None, None)),
+            Arc::new(OwnedColumn::new(vec![4, 5, 6], None, None)),
+        ];
         let expr: Expression =
             Expression::new(s.clone(), Binding::OwnedColumn, vec![Binding::RefColumn]);
         let expr: Expression =
@@ -964,12 +975,98 @@ mod tests {
             .zip_eq(col2.par_iter())
             .zip_eq(col3.par_iter())
             .for_each(|((c1, c2), c3)| {
-                let col1_refmut: &mut OwnedColumn<Vec<u64>> = Arc::get_mut(c1).unwrap();
-                let col2_ref: &Vec<u64> = &(**c2);
-                let col3_ref: &Vec<u64> = &(**c3);
+                let col2_ref: &OwnedColumn<Vec<u64>> = &(**c2);
+                let col3_ref: &OwnedColumn<Vec<u64>> = &(**c3);
+                expr.eval(c1, &mut vec![col2_ref, col3_ref], &mut vec![], &dict);
+            });
+
+        drop(col2);
+
+        let col1: Vec<Box<OwnedColumn<Vec<u64>>>> = col1
+            .into_iter()
+            .map(|mut c| {
+                (c.pop().unwrap() as Box<dyn Any>)
+                    .downcast::<OwnedColumn<Vec<u64>>>()
+                    .unwrap()
+            })
+            .collect();
+
+        assert_eq!(col1[0].col(), &[6, 2, 12]);
+        assert_eq!(col1[0].bitmap().as_ref().unwrap().bits, &[1, 0, 1]);
+        assert_eq!(col1[1].col(), &[6, 10, 12]);
+        assert_eq!(col1[1].bitmap(), &None);
+    }
+
+    #[test]
+    fn expression_compile() {
+        use crate::column::*;
+        use std::any::TypeId;
+
+        let mut dict: OpDictionary = HashMap::new();
+        load_op_dict(&mut dict);
+        let mut init_dict: InitDictionary = HashMap::new();
+        load_init_dict(&mut init_dict);
+
+        let s1 = sig!["+"; OwnedColumn<Vec<u64>>;OwnedColumn<Vec<u64>>, OwnedColumn<Vec<u64>>];
+        let s2 = sig!["+="; OwnedColumn<Vec<u64>>;OwnedColumn<Vec<u64>>];
+
+        let col1: OwnedColumn<Vec<u64>> = OwnedColumn::new(
+            vec![1, 2, 3],
+            None,
+            Some(Bitmap {
+                bits: vec![1, 0, 1],
+            }),
+        );
+
+        let mut col1: Vec<Arc<OwnedColumn<Vec<u64>>>> = vec![
+            Arc::new(col1),
+            Arc::new(OwnedColumn::new(vec![1, 2, 3], None, None)),
+        ];
+        let col2: Vec<Arc<OwnedColumn<Vec<u64>>>> = vec![
+            Arc::new(OwnedColumn::new(vec![1, 3, 3], None, None)),
+            Arc::new(OwnedColumn::new(vec![1, 3, 3], None, None)),
+        ];
+        let col3: Vec<Arc<OwnedColumn<Vec<u64>>>> = vec![
+            Arc::new(OwnedColumn::new(vec![4, 5, 6], None, None)),
+            Arc::new(OwnedColumn::new(vec![4, 5, 6], None, None)),
+        ];
+
+        let expr: Expression = Expression::new(
+            s1.clone(),
+            Binding::OwnedColumn,
+            vec![Binding::RefColumn, Binding::RefColumn],
+        );
+        let expr: Expression =
+            Expression::new(s2, Binding::Expr(Box::new(expr)), vec![Binding::RefColumn]);
+
+        let (ops, mut owned_values) = expr.compile(&dict, &init_dict);
+
+        let v = (owned_values.pop().unwrap() as Box<dyn Any>)
+            .downcast::<OwnedColumn<Vec<u64>>>()
+            .unwrap();
+
+        let (ops, mut owned_values) = expr.compile(&dict, &init_dict);
+
+        let mut output = vec![owned_values];
+        let (ops, mut owned_values) = expr.compile(&dict, &init_dict);
+        assert_eq!(ops.len(), 2);
+        assert_eq!(owned_values.len(), 1);
+
+        output.push(owned_values);
+        output
+            .par_iter_mut()
+            .zip_eq(col1.par_iter())
+            .zip_eq(col2.par_iter())
+            .zip_eq(col3.par_iter())
+            .for_each(|(((output, c1), c2), c3)| {
+                let (ops, mut owned_values) = expr.compile(&dict, &init_dict);
+
+                let col1_ref: &OwnedColumn<Vec<u64>> = &(**c1);
+                let col2_ref: &OwnedColumn<Vec<u64>> = &(**c2);
+                let col3_ref: &OwnedColumn<Vec<u64>> = &(**c3);
                 expr.eval(
-                    &mut vec![col1_refmut],
-                    &mut vec![col2_ref, col3_ref],
+                    output,
+                    &mut vec![col3_ref, col2_ref, col1_ref],
                     &mut vec![],
                     &dict,
                 );
@@ -977,7 +1074,18 @@ mod tests {
 
         drop(col2);
 
-        assert_eq!(col1[0].col(), &[6, 2, 12]);
-        assert_eq!(col1[0].bitmap().as_ref().unwrap().bits, &[1, 0, 1]);
+        let output: Vec<Box<OwnedColumn<Vec<u64>>>> = output
+            .into_iter()
+            .map(|mut c| {
+                (c.pop().unwrap() as Box<dyn Any>)
+                    .downcast::<OwnedColumn<Vec<u64>>>()
+                    .unwrap()
+            })
+            .collect();
+
+        assert_eq!(*output[0].col(), &[6, 0, 12]);
+        assert_eq!((*output[0].bitmap()).as_ref().unwrap().bits, &[1, 0, 1]);
+        assert_eq!(*output[1].col(), &[6, 10, 12]);
+        assert_eq!((*output[1].bitmap()), None);
     }
 }

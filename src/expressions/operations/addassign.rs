@@ -1,6 +1,4 @@
 use crate::bitmap::Bitmap;
-use crate::expressions::dictionary::Dictionary;
-use crate::expressions::dictionary::Signature;
 use crate::{Column, ColumnMut, OwnedColumn};
 use concat_idents::concat_idents;
 use core::any::{Any, TypeId};
@@ -16,8 +14,8 @@ const OP: &str = "+=";
 
 macro_rules! operation_load {
     ($dict:ident; $(($tl:ty, $tr:ty))+) => ($(
-        concat_idents!(fn_name = addassign, _, ownedcolumnvec,$tl,_,vec,$tr {
-            let signature=sig![OP;OwnedColumn<Vec<$tl>>; Vec<$tr>];
+        concat_idents!(fn_name = addassign, _, ownedcolumnvec,$tl,_,ownedcolumnvec,$tr {
+            let signature=sig![OP;OwnedColumn<Vec<$tl>>; OwnedColumn<Vec<$tr>>];
             $dict.insert(signature, fn_name);
         });
     )+)
@@ -25,9 +23,9 @@ macro_rules! operation_load {
 
 macro_rules! operation_impl {
     ($(($tl:ty, $tr:ty))+) => ($(
-        concat_idents!(fn_name = addassign, _, ownedcolumnvec,$tl,_,vec,$tr {
+        concat_idents!(fn_name = addassign, _, ownedcolumnvec,$tl,_,ownedcolumnvec,$tr {
             #[allow(dead_code)]
-            fn fn_name(left: &mut dyn Any, right: Vec<&dyn Any>) {
+            fn fn_name(left: &mut dyn Any, right: Vec<InputTypes>) {
 
 
 
@@ -35,7 +33,10 @@ macro_rules! operation_impl {
                 type T2=$tr;
 
                 let down_left = left.downcast_mut::<OwnedColumn<Vec<T1>>>().unwrap();
-                let down_right = right[0].downcast_ref::<Vec<T2>>().unwrap();
+                let down_right = match &right[0] {
+                    InputTypes::Ref(a)=>a.downcast_ref::<OwnedColumn<Vec<T2>>>().unwrap(),
+                    InputTypes::Owned(a)=>a.downcast_ref::<OwnedColumn<Vec<T2>>>().unwrap()
+                };
 
                 let (data_left, index_left, bitmap_left) = down_left.all_mut();
 
@@ -175,7 +176,7 @@ operation_impl! {
 
 //operation_impl! { (u64,u8) (u64,u16) (u64,u32) (u64,u64) }
 
-pub(crate) fn init_dict(dict: &mut Dictionary) {
+pub(crate) fn load_op_dict(dict: &mut OpDictionary) {
     //dict.insert(s, columnadd_onwedcolumnvecu64_vecu64);7
     operation_load! {dict;
 

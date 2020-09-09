@@ -1,6 +1,4 @@
 use crate::bitmap::Bitmap;
-use crate::expressions::dictionary::Dictionary;
-use crate::expressions::dictionary::Signature;
 use crate::{Column, ColumnMut, OwnedColumn};
 use concat_idents::concat_idents;
 use core::any::{Any, TypeId};
@@ -29,14 +27,17 @@ macro_rules! binary_operation_impl {
     ($($tr:ty)+) => ($(
         concat_idents!(fn_name = hashadd, _, ownedcolumnvecu64,_,arcvec,$tr {
             #[allow(dead_code)]
-            fn fn_name(left: &mut dyn Any, right: Vec<&dyn Any>) {
+            fn fn_name(left: &mut dyn Any, right: Vec<InputTypes>) {
 
                 let rs=ahash::RandomState::with_seeds(1234,5678);
 
                 type T2=$tr;
 
                 let down_left = left.downcast_mut::<OwnedColumn<Vec<u64>>>().unwrap();
-                let down_right = right[0].downcast_ref::<Arc<Vec<T2>>>().unwrap();
+                let down_right = match &right[0] {
+                    InputTypes::Ref(a)=>a.downcast_ref::<Vec<T2>>().unwrap(),
+                    InputTypes::Owned(a)=>a.downcast_ref::<Vec<T2>>().unwrap()
+                };
 
                 let (data_left, index_left, bitmap_left) = down_left.all_mut();
 
@@ -131,7 +132,7 @@ u64 u32 u16 u8 bool
 
 //binary_operation_impl! { (u64,u8) (u64,u16) (u64,u32) (u64,u64) }
 
-pub(crate) fn init_dict(dict: &mut Dictionary) {
+pub(crate) fn load_op_dict(dict: &mut OpDictionary) {
     //dict.insert(s, columnadd_onwedcolumnvecu64_vecu64);7
     binary_operation_load! {dict;
 
