@@ -9,6 +9,7 @@ mod expressions;
 mod hashcolumn;
 mod hashjoin;
 mod helpers;
+mod sql;
 
 pub use bucketcolumn::*;
 pub use column::*;
@@ -18,6 +19,8 @@ pub use columnrepartition::*;
 pub use columnu8::*;
 pub use expressions::*;
 pub use hashjoin::*;
+pub use sql::*;
+use sqlparser::ast::{Expr, Select, SelectItem, SetExpr, Statement};
 //TO-DO: Make library safe (e.g.) safe rust code outside of it can't cause UB
 
 #[cfg(test)]
@@ -28,7 +31,7 @@ mod tests {
     //use crate::expressions::operations::init_dict;
     use crate::hashcolumn::*;
     use crate::*;
-    use std::{any::Any, collections::HashMap, ops::DerefMut, sync::Arc};
+    use std::{any::Any, collections::HashMap, ops::Deref, ops::DerefMut, sync::Arc};
 
     use std::collections::hash_map::RandomState;
     use std::rc::*;
@@ -934,70 +937,6 @@ mod tests {
     }
 
     #[test]
-    fn basic_expression_2() {
-        use crate::column::*;
-        use std::any::TypeId;
-
-        let mut dict: OpDictionary = HashMap::new();
-        load_op_dict(&mut dict);
-
-        let s = sig!["+="; OwnedColumn<Vec<u64>>;OwnedColumn<Vec<u64>>];
-
-        let col1: OwnedColumn<Vec<u64>> = OwnedColumn::new(
-            vec![1, 2, 3],
-            None,
-            Some(Bitmap {
-                bits: vec![1, 0, 1],
-            }),
-        );
-
-        let mut col1: Vec<Vec<Box<dyn Any + Send + Sync>>> = vec![
-            vec![Box::new(col1)],
-            vec![Box::new(OwnedColumn::<Vec<u64>>::new(
-                vec![1, 2, 3],
-                None,
-                None,
-            ))],
-        ];
-        let col2: Vec<Arc<OwnedColumn<Vec<u64>>>> = vec![
-            Arc::new(OwnedColumn::new(vec![1, 3, 3], None, None)),
-            Arc::new(OwnedColumn::new(vec![1, 3, 3], None, None)),
-        ];
-        let col3: Vec<Arc<OwnedColumn<Vec<u64>>>> = vec![
-            Arc::new(OwnedColumn::new(vec![4, 5, 6], None, None)),
-            Arc::new(OwnedColumn::new(vec![4, 5, 6], None, None)),
-        ];
-        let expr: Expression =
-            Expression::new(s.clone(), Binding::OwnedColumn, vec![Binding::RefColumn]);
-        let expr: Expression =
-            Expression::new(s, Binding::Expr(Box::new(expr)), vec![Binding::RefColumn]);
-        col1.par_iter_mut()
-            .zip_eq(col2.par_iter())
-            .zip_eq(col3.par_iter())
-            .for_each(|((c1, c2), c3)| {
-                let col2_ref: &OwnedColumn<Vec<u64>> = &(**c2);
-                let col3_ref: &OwnedColumn<Vec<u64>> = &(**c3);
-                expr.eval(c1, &mut vec![col2_ref, col3_ref], &mut vec![], &dict);
-            });
-
-        drop(col2);
-
-        let col1: Vec<Box<OwnedColumn<Vec<u64>>>> = col1
-            .into_iter()
-            .map(|mut c| {
-                (c.pop().unwrap() as Box<dyn Any>)
-                    .downcast::<OwnedColumn<Vec<u64>>>()
-                    .unwrap()
-            })
-            .collect();
-
-        assert_eq!(col1[0].col(), &[6, 2, 12]);
-        assert_eq!(col1[0].bitmap().as_ref().unwrap().bits, &[1, 0, 1]);
-        assert_eq!(col1[1].col(), &[6, 10, 12]);
-        assert_eq!(col1[1].bitmap(), &None);
-    }
-
-    #[test]
     fn expression_compile() {
         use crate::column::*;
         use std::any::TypeId;
@@ -1007,62 +946,68 @@ mod tests {
         let mut init_dict: InitDictionary = HashMap::new();
         load_init_dict(&mut init_dict);
 
-        let s1 = sig!["+"; OwnedColumn<Vec<u64>>;OwnedColumn<Vec<u64>>, OwnedColumn<Vec<u64>>];
-        let s2 = sig!["+="; OwnedColumn<Vec<u64>>;OwnedColumn<Vec<u64>>];
+        let s1 = sig!["+"; Vec<u32>;Vec<u32>, Vec<u32>];
+        let s2 = sig!["+"; Vec<u64>;Vec<u64>, Vec<u32>];
+        let s3 = sig!["+="; Vec<u64>;Vec<u64>];
 
-        let col1: OwnedColumn<Vec<u64>> = OwnedColumn::new(
-            vec![1, 2, 3],
-            None,
-            Some(Bitmap {
-                bits: vec![1, 0, 1],
-            }),
-        );
+        let col1: Vec<ColumnWrapper> = vec![
+            //let col1: Vec<Arc<OwnedColumn<Vec<u64>>>> = vec![
+            ColumnWrapper::new(
+                vec![1_u32, 2, 3],
+                None,
+                Some(Bitmap {
+                    bits: vec![1, 0, 1],
+                }),
+            ),
+            ColumnWrapper::new(vec![1_u32, 2, 3], None, None),
+            ColumnWrapper::new(vec![1_u32], Some(vec![0, 0, 0]), None),
+        ];
+        let col2: Vec<ColumnWrapper> = vec![
+            ColumnWrapper::new(vec![1_u32, 3, 3], None, None),
+            ColumnWrapper::new(vec![1_u32, 3, 3], None, None),
+            ColumnWrapper::new(vec![1_u32, 3, 3], None, None),
+        ];
 
-        let mut col1: Vec<Arc<OwnedColumn<Vec<u64>>>> = vec![
-            Arc::new(col1),
-            Arc::new(OwnedColumn::new(vec![1, 2, 3], None, None)),
-            Arc::new(OwnedColumn::new(vec![1], Some(vec![0, 0, 0]), None)),
+        let col3: Vec<ColumnWrapper> = vec![
+            ColumnWrapper::new(vec![0_u64, 0, 0], None, None),
+            ColumnWrapper::new(vec![0_u64, 0, 0], None, None),
+            ColumnWrapper::new(vec![0_u64, 0, 0], None, None),
         ];
-        let col2: Vec<Arc<OwnedColumn<Vec<u64>>>> = vec![
-            Arc::new(OwnedColumn::new(vec![1, 3, 3], None, None)),
-            Arc::new(OwnedColumn::new(vec![1, 3, 3], None, None)),
-            Arc::new(OwnedColumn::new(vec![1, 3, 3], None, None)),
-        ];
-        let col3: Vec<Arc<OwnedColumn<Vec<u64>>>> = vec![
-            Arc::new(OwnedColumn::new(vec![4, 5, 6], None, None)),
-            Arc::new(OwnedColumn::new(vec![4, 5, 6], None, None)),
-            Arc::new(OwnedColumn::new(vec![4, 5, 6], None, None)),
+
+        let col4: Vec<ColumnWrapper> = vec![
+            ColumnWrapper::new(vec![4_u64, 5, 6], None, None),
+            ColumnWrapper::new(vec![4_u64, 5, 6], None, None),
+            ColumnWrapper::new(vec![4_u64, 5, 6], None, None),
         ];
 
         let expr: Expression = Expression::new(
-            s1.clone(),
+            s1,
             Binding::OwnedColumn,
             vec![Binding::RefColumn, Binding::RefColumn],
         );
+        let expr: Expression = Expression::new(
+            s2,
+            Binding::OwnedColumn,
+            vec![Binding::RefColumn, Binding::Expr(Box::new(expr))],
+        );
         let expr: Expression =
-            Expression::new(s2, Binding::Expr(Box::new(expr)), vec![Binding::RefColumn]);
+            Expression::new(s3, Binding::Expr(Box::new(expr)), vec![Binding::RefColumn]);
 
         let (ops, mut owned_values) = expr.compile(&dict, &init_dict);
-        assert_eq!(owned_values.len(), 1);
-        assert_eq!(ops.len(), 2);
-
-        let v = (owned_values.pop().unwrap() as Box<dyn Any>)
-            .downcast::<OwnedColumn<Vec<u64>>>()
-            .unwrap();
+        assert_eq!(owned_values.len(), 2);
+        assert_eq!(ops.len(), 3);
 
         let output: Vec<_> = col1
-            .par_iter()
-            .zip_eq(col2.par_iter())
-            .zip_eq(col3.par_iter())
-            .map(|((c1, c2), c3)| {
-                let (ops, mut owned_values) = expr.compile(&dict, &init_dict);
+            .iter()
+            .zip(col2.iter())
+            .zip(col3.iter())
+            .zip(col4.iter())
+            .map(|(((c1, c2), c3), c4)| {
+                let (_, mut owned_values) = expr.compile(&dict, &init_dict);
 
-                let col1_ref: &OwnedColumn<Vec<u64>> = &(**c1);
-                let col2_ref: &OwnedColumn<Vec<u64>> = &(**c2);
-                let col3_ref: &OwnedColumn<Vec<u64>> = &(**c3);
                 expr.eval(
                     &mut owned_values,
-                    &mut vec![col3_ref, col2_ref, col1_ref],
+                    &mut vec![c3, c1, c2, c4],
                     &mut vec![],
                     &dict,
                 );
@@ -1073,20 +1018,43 @@ mod tests {
 
         drop(col2);
 
-        let output: Vec<Box<OwnedColumn<Vec<u64>>>> = output
+        let output: Vec<Vec<u64>> = output
             .into_iter()
-            .map(|mut c| {
-                (c.pop().unwrap() as Box<dyn Any>)
-                    .downcast::<OwnedColumn<Vec<u64>>>()
-                    .unwrap()
-            })
+            .map(|mut c| c.pop().unwrap().unwrap::<Vec<u64>>())
             .collect();
 
-        assert_eq!(*output[0].col(), &[6, 0, 12]);
-        assert_eq!((*output[0].bitmap()).as_ref().unwrap().bits, &[1, 0, 1]);
-        assert_eq!(*output[1].col(), &[6, 10, 12]);
-        assert_eq!((*output[1].bitmap()), None);
-        assert_eq!(*output[2].col(), &[6, 9, 10]);
-        assert_eq!((*output[2].bitmap()), None);
+        assert_eq!(output[0], &[6, 0, 12]);
+        assert_eq!(output[1], &[6, 10, 12]);
+        assert_eq!(output[2], &[6, 9, 10]);
+    }
+
+    #[test]
+    fn parse_expression() {
+        let sqlstmt = "SELECT ((col1+col2)+col3)";
+        let ast = sql2ast(&sqlstmt);
+
+        let p: Expr = if let Statement::Query(a) = &ast[0] {
+            let query = &(**a);
+            if let SetExpr::Select(a) = &query.body {
+                let projection = &(**a).projection;
+                let selectitem = &projection[0];
+                if let SelectItem::UnnamedExpr(e) = selectitem {
+                    e.clone()
+                } else {
+                    panic!()
+                }
+            } else {
+                panic!()
+            }
+        } else {
+            panic!()
+        };
+
+        let c1 = ColumnWrapper::new_with_name(vec![4_u64, 5, 6], None, None, "col1");
+        let c2 = ColumnWrapper::new_with_name(vec![4_u32, 5, 6], None, None, "col2");
+        let c3 = ColumnWrapper::new_with_name(vec![4_u32, 5, 6], None, None, "col3");
+
+        println!("{:?}", &p);
+        println!("{:?}", parseexpr(&p, &vec![c1, c2, c3]).0);
     }
 }

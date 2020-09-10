@@ -1,7 +1,6 @@
 use crate::bitmap::Bitmap;
-use crate::{Column, ColumnMut, OwnedColumn};
 use concat_idents::concat_idents;
-use core::any::{Any, TypeId};
+use core::any::TypeId;
 
 use std::hash::{BuildHasher, Hash, Hasher};
 
@@ -14,8 +13,8 @@ const OP: &str = "hash=";
 
 macro_rules! binary_operation_load {
     ($dict:ident; $($tr:ty)+) => ($(
-        concat_idents!(fn_name = hash, _, ownedcolumnvecu64,_,ownedcolumnvec,$tr {
-            let signature=sig![OP;OwnedColumn<Vec<u64>>; OwnedColumn<Vec<$tr>>];
+        concat_idents!(fn_name = hash, _, vecu64,_,vec,$tr {
+            let signature=sig![OP;Vec<u64>; Vec<$tr>];
             $dict.insert(signature, fn_name);
         });
     )+)
@@ -23,52 +22,50 @@ macro_rules! binary_operation_load {
 
 macro_rules! binary_operation_impl {
     ($($tr:ty)+) => ($(
-        concat_idents!(fn_name = hash, _, ownedcolumnvecu64,_,ownedcolumnvec,$tr {
+        concat_idents!(fn_name = hash, _, vecu64,_,vec,$tr {
             #[allow(dead_code)]
-            fn fn_name(left: &mut dyn Any, right: Vec<InputTypes>) {
+            fn fn_name(output: &mut ColumnWrapper, input: Vec<InputTypes>)  {
 
                 let rs=ahash::RandomState::with_seeds(1234,5678);
 
+                type T1=u64;
                 type T2=$tr;
 
-                let output = left.downcast_mut::<OwnedColumn<Vec<u64>>>().unwrap();
-                let down_right = match &right[0] {
-                    InputTypes::Ref(a)=>a.downcast_ref::<OwnedColumn<Vec<T2>>>().unwrap(),
-                    InputTypes::Owned(a)=>a.downcast_ref::<OwnedColumn<Vec<T2>>>().unwrap()
+                //naming convention:
+                // left->output
+                //right[0]-->input
+                //if right[0] and right[1]-> input_lhs, input_rhs
+
+                let (data_output, index_output, bitmap_output) = output.all_mut::<Vec<T1>>();
+
+                let (data_input, index_input, bitmap_input) = match &input[0] {
+                    InputTypes::Ref(a)=>(a.downcast_ref::<Vec<T1>>(), a.index().as_ref(), a.bitmap().as_ref()),
+                    InputTypes::Owned(a)=>(a.downcast_ref::<Vec<T1>>(), a.index().as_ref(), a.bitmap().as_ref())
                 };
 
-
-
-
-                let bitmap_right = &down_right.bitmap().as_ref();
-                let index_right = &down_right.index().as_ref();
-                let data_right = &down_right.col();
-
-
-                let len_right = if let Some(ind) = index_right {
+                let len_input = if let Some(ind) = index_input {
                     ind.len()
                 } else {
-                    data_right.len()
+                    data_input.len()
                 };
 
                 //Clean up
-                let (data_output, index_output, bitmap_output) = output.all_mut();
                 data_output.truncate(0);
                 *index_output=None;
                 *bitmap_output=None;
                 //Reserve enough storage for result
-                data_output.reserve(len_right);
+                data_output.reserve(len_input);
 
 
-                match (&index_right, &bitmap_right) {
+                match (&index_input, &bitmap_input) {
                     (Some(ind), None) => data_output.par_extend(
-                        ind.par_iter().map(|i| &data_right[*i])
+                        ind.par_iter().map(|i| &data_input[*i])
                         .map(|r|  {
                             let mut h=rs.build_hasher();
                             r.hash(&mut h); h.finish()
                         })),
                     (Some(ind), Some(b_right)) => data_output.par_extend(
-                        ind.par_iter().map(|i| &data_right[*i])
+                        ind.par_iter().map(|i| &data_input[*i])
                         .zip_eq(b_right.bits.par_iter())
                         .map(|(r, b_r)| {
                             if *b_r != 0 {
@@ -79,11 +76,11 @@ macro_rules! binary_operation_impl {
                         })),
 
                     (None, None) => data_output.par_extend(
-                        data_right.par_iter()
+                        data_input.par_iter()
                         .map(|r| {let mut h=rs.build_hasher(); r.hash(&mut h); h.finish()})),
 
                     (None, Some(b_right)) => data_output.par_extend(
-                        data_right.par_iter()
+                        data_input.par_iter()
                         .zip_eq(b_right.bits.par_iter())
                         .map(|(r, b_r)| {
                             if *b_r != 0 {
@@ -94,8 +91,8 @@ macro_rules! binary_operation_impl {
                         })),
                 };
 
-                if let Some(bmap)=&bitmap_right{
-                    if let Some(ind)=&index_right{
+                if let Some(bmap)=&bitmap_input{
+                    if let Some(ind)=&index_input{
                         *bitmap_output=Some(Bitmap{bits: ind.par_iter().map(|i| bmap.bits[*i]).collect()});
                     } else {
                         *bitmap_output=Some(Bitmap{bits: bmap.bits.par_iter().map(|i| *i).collect()});

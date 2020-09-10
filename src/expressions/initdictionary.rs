@@ -5,8 +5,7 @@ use std::collections::HashMap;
 use crate::OwnedColumn;
 use concat_idents::concat_idents;
 
-pub type InitOutput = Box<dyn Any + Send + Sync + 'static>;
-pub type InitOperation = fn() -> InitOutput;
+pub type InitOperation = fn() -> ColumnWrapper;
 
 pub type InitDictionary = HashMap<Signature, InitOperation>;
 
@@ -17,8 +16,8 @@ const OP: &str = "new";
 
 macro_rules! binary_operation_load {
     ($dict:ident; $($tr:ty)+) => ($(
-        concat_idents!(fn_name = new, _, ownedcolumnvec,$tr {
-            let signature=sig![OP;OwnedColumn<Vec<$tr>>];
+        concat_idents!(fn_name = new, _, vec,$tr {
+            let signature=sig![OP;Vec<$tr>];
             $dict.insert(signature, fn_name);
         });
     )+)
@@ -26,10 +25,10 @@ macro_rules! binary_operation_load {
 
 macro_rules! binary_operation_impl {
     ($($tr:ty)+) => ($(
-        concat_idents!(fn_name = new, _, ownedcolumnvec,$tr {
+        concat_idents!(fn_name = new, _, vec,$tr {
             #[allow(dead_code)]
-            fn fn_name()->InitOutput {
-                Box::new(OwnedColumn::<Vec<$tr>>::new(vec![], None, None))
+            fn fn_name()->ColumnWrapper {
+                ColumnWrapper::new(Vec::<$tr>::new(), None, None)
             }
 
     });
