@@ -1,11 +1,10 @@
 use crate::InitDictionary;
 use crate::InitOutput;
+use std::collections::HashMap;
 use std::{
     any::{Any, TypeId},
     ops::DerefMut,
-    sync::Arc,
 };
-use std::{collections::HashMap, rc::Rc};
 
 pub enum InputTypes<'a> {
     Ref(&'a dyn Any),
@@ -146,8 +145,6 @@ impl Expression {
             }
             Binding::Expr(expr) => {
                 (*expr).compile_recursive(dict, init_dict, ops, owned_columns);
-                let op = dict.get(&expr.op).unwrap();
-                //ops.push(*op);
             }
             Binding::RefColumn | Binding::ConstValue => panic!("Incorrect expression output type"),
         }
@@ -155,8 +152,6 @@ impl Expression {
             Binding::OwnedColumn | Binding::RefColumn | Binding::ConstValue => {}
             Binding::Expr(expr) => {
                 (*expr).compile_recursive(dict, init_dict, ops, owned_columns);
-                let op = dict.get(&expr.op).unwrap();
-                //ops.push(*op);
             }
         });
         let op = dict.get(&self.op).unwrap();

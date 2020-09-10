@@ -2,7 +2,6 @@ use crate::bitmap::Bitmap;
 use crate::{Column, ColumnMut, OwnedColumn};
 use concat_idents::concat_idents;
 use core::any::{Any, TypeId};
-use std::sync::Arc;
 
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::ops::AddAssign;
@@ -16,8 +15,8 @@ const OP: &str = "hash+=";
 
 macro_rules! binary_operation_load {
     ($dict:ident; $($tr:ty)+) => ($(
-        concat_idents!(fn_name = hashadd, _, ownedcolumnvecu64,_,arcvec,$tr {
-            let signature=sig![OP;OwnedColumn<Vec<u64>>; Arc<Vec<$tr>>];
+        concat_idents!(fn_name = hashadd, _, ownedcolumnvecu64,_,ownedcolumnvec,$tr {
+            let signature=sig![OP;OwnedColumn<Vec<u64>>; OwnedColumn<Vec<$tr>>];
             $dict.insert(signature, fn_name);
         });
     )+)
@@ -25,7 +24,7 @@ macro_rules! binary_operation_load {
 
 macro_rules! binary_operation_impl {
     ($($tr:ty)+) => ($(
-        concat_idents!(fn_name = hashadd, _, ownedcolumnvecu64,_,arcvec,$tr {
+        concat_idents!(fn_name = hashadd, _, ownedcolumnvecu64,_,ownedcolumnvec,$tr {
             #[allow(dead_code)]
             fn fn_name(left: &mut dyn Any, right: Vec<InputTypes>) {
 
@@ -35,8 +34,8 @@ macro_rules! binary_operation_impl {
 
                 let down_left = left.downcast_mut::<OwnedColumn<Vec<u64>>>().unwrap();
                 let down_right = match &right[0] {
-                    InputTypes::Ref(a)=>a.downcast_ref::<Vec<T2>>().unwrap(),
-                    InputTypes::Owned(a)=>a.downcast_ref::<Vec<T2>>().unwrap()
+                    InputTypes::Ref(a)=>a.downcast_ref::<OwnedColumn<Vec<T2>>>().unwrap(),
+                    InputTypes::Owned(a)=>a.downcast_ref::<OwnedColumn<Vec<T2>>>().unwrap()
                 };
 
                 let (data_left, index_left, bitmap_left) = down_left.all_mut();

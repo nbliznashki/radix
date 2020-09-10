@@ -1021,12 +1021,15 @@ mod tests {
         let mut col1: Vec<Arc<OwnedColumn<Vec<u64>>>> = vec![
             Arc::new(col1),
             Arc::new(OwnedColumn::new(vec![1, 2, 3], None, None)),
+            Arc::new(OwnedColumn::new(vec![1], Some(vec![0, 0, 0]), None)),
         ];
         let col2: Vec<Arc<OwnedColumn<Vec<u64>>>> = vec![
             Arc::new(OwnedColumn::new(vec![1, 3, 3], None, None)),
             Arc::new(OwnedColumn::new(vec![1, 3, 3], None, None)),
+            Arc::new(OwnedColumn::new(vec![1, 3, 3], None, None)),
         ];
         let col3: Vec<Arc<OwnedColumn<Vec<u64>>>> = vec![
+            Arc::new(OwnedColumn::new(vec![4, 5, 6], None, None)),
             Arc::new(OwnedColumn::new(vec![4, 5, 6], None, None)),
             Arc::new(OwnedColumn::new(vec![4, 5, 6], None, None)),
         ];
@@ -1040,37 +1043,33 @@ mod tests {
             Expression::new(s2, Binding::Expr(Box::new(expr)), vec![Binding::RefColumn]);
 
         let (ops, mut owned_values) = expr.compile(&dict, &init_dict);
+        assert_eq!(owned_values.len(), 1);
+        assert_eq!(ops.len(), 2);
 
         let v = (owned_values.pop().unwrap() as Box<dyn Any>)
             .downcast::<OwnedColumn<Vec<u64>>>()
             .unwrap();
 
-        let (ops, mut owned_values) = expr.compile(&dict, &init_dict);
-
-        let mut output = vec![owned_values];
-        let (ops, mut owned_values) = expr.compile(&dict, &init_dict);
-        assert_eq!(ops.len(), 2);
-        assert_eq!(owned_values.len(), 1);
-
-        output.push(owned_values);
-        output
-            .par_iter_mut()
-            .zip_eq(col1.par_iter())
+        let output: Vec<_> = col1
+            .par_iter()
             .zip_eq(col2.par_iter())
             .zip_eq(col3.par_iter())
-            .for_each(|(((output, c1), c2), c3)| {
+            .map(|((c1, c2), c3)| {
                 let (ops, mut owned_values) = expr.compile(&dict, &init_dict);
 
                 let col1_ref: &OwnedColumn<Vec<u64>> = &(**c1);
                 let col2_ref: &OwnedColumn<Vec<u64>> = &(**c2);
                 let col3_ref: &OwnedColumn<Vec<u64>> = &(**c3);
                 expr.eval(
-                    output,
+                    &mut owned_values,
                     &mut vec![col3_ref, col2_ref, col1_ref],
                     &mut vec![],
                     &dict,
                 );
-            });
+
+                owned_values
+            })
+            .collect();
 
         drop(col2);
 
@@ -1087,5 +1086,7 @@ mod tests {
         assert_eq!((*output[0].bitmap()).as_ref().unwrap().bits, &[1, 0, 1]);
         assert_eq!(*output[1].col(), &[6, 10, 12]);
         assert_eq!((*output[1].bitmap()), None);
+        assert_eq!(*output[2].col(), &[6, 9, 10]);
+        assert_eq!((*output[2].bitmap()), None);
     }
 }

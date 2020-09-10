@@ -1,12 +1,8 @@
 use crate::Signature;
+use std::any::{Any, TypeId};
 use std::collections::HashMap;
-use std::rc::Rc;
-use std::{
-    any::{Any, TypeId},
-    sync::Arc,
-};
 
-use crate::{Column, ColumnMut, OwnedColumn};
+use crate::OwnedColumn;
 use concat_idents::concat_idents;
 
 pub type InitOutput = Box<dyn Any + Send + Sync + 'static>;
