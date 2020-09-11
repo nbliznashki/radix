@@ -983,15 +983,18 @@ mod tests {
         let expr: Expression = Expression::new(
             s1,
             Binding::OwnedColumn,
-            vec![Binding::RefColumn, Binding::RefColumn],
+            vec![Binding::RefColumn(0), Binding::RefColumn(1)],
         );
         let expr: Expression = Expression::new(
             s2,
             Binding::OwnedColumn,
-            vec![Binding::RefColumn, Binding::Expr(Box::new(expr))],
+            vec![Binding::RefColumn(2), Binding::Expr(Box::new(expr))],
         );
-        let expr: Expression =
-            Expression::new(s3, Binding::Expr(Box::new(expr)), vec![Binding::RefColumn]);
+        let expr: Expression = Expression::new(
+            s3,
+            Binding::Expr(Box::new(expr)),
+            vec![Binding::RefColumn(3)],
+        );
 
         let (ops, mut owned_values) = expr.compile(&dict, &init_dict);
         assert_eq!(owned_values.len(), 2);
@@ -1005,23 +1008,22 @@ mod tests {
             .map(|(((c1, c2), c3), c4)| {
                 let (_, mut owned_values) = expr.compile(&dict, &init_dict);
 
+                let mut owned_values_refmut = owned_values.iter_mut().collect();
+
                 expr.eval(
-                    &mut owned_values,
-                    &mut vec![c3, c1, c2, c4],
-                    &mut vec![],
+                    &mut owned_values_refmut,
+                    &vec![c1, c2, c3, c4],
+                    &vec![],
                     &dict,
                 );
 
-                owned_values
+                owned_values.pop().unwrap()
             })
             .collect();
 
         drop(col2);
 
-        let output: Vec<Vec<u64>> = output
-            .into_iter()
-            .map(|mut c| c.pop().unwrap().unwrap::<Vec<u64>>())
-            .collect();
+        let output: Vec<Vec<u64>> = output.into_iter().map(|c| c.unwrap::<Vec<u64>>()).collect();
 
         assert_eq!(output[0], &[6, 0, 12]);
         assert_eq!(output[1], &[6, 10, 12]);
@@ -1030,31 +1032,52 @@ mod tests {
 
     #[test]
     fn parse_expression() {
-        let sqlstmt = "SELECT ((col1+col2)+col3)";
-        let ast = sql2ast(&sqlstmt);
+        fn get_first_projection(sqlstmt: &str) -> Expr {
+            let ast = sql2ast(&sqlstmt);
 
-        let p: Expr = if let Statement::Query(a) = &ast[0] {
-            let query = &(**a);
-            if let SetExpr::Select(a) = &query.body {
-                let projection = &(**a).projection;
-                let selectitem = &projection[0];
-                if let SelectItem::UnnamedExpr(e) = selectitem {
-                    e.clone()
+            let p: Expr = if let Statement::Query(a) = &ast[0] {
+                let query = &(**a);
+                if let SetExpr::Select(a) = &query.body {
+                    let projection = &(**a).projection;
+                    let selectitem = &projection[0];
+                    if let SelectItem::UnnamedExpr(e) = selectitem {
+                        return e.clone();
+                    } else {
+                        panic!()
+                    }
                 } else {
                     panic!()
                 }
             } else {
                 panic!()
-            }
-        } else {
-            panic!()
-        };
+            };
+        }
+
+        let mut dict: OpDictionary = HashMap::new();
+        load_op_dict(&mut dict);
+        let mut init_dict: InitDictionary = HashMap::new();
+        load_init_dict(&mut init_dict);
 
         let c1 = ColumnWrapper::new_with_name(vec![4_u64, 5, 6], None, None, "col1");
         let c2 = ColumnWrapper::new_with_name(vec![4_u32, 5, 6], None, None, "col2");
         let c3 = ColumnWrapper::new_with_name(vec![4_u32, 5, 6], None, None, "col3");
+        let ref_columns = vec![c1, c2, c3];
 
-        println!("{:?}", &p);
-        println!("{:?}", parseexpr(&p, &vec![c1, c2, c3]).0);
+        let sqlstmt = "SELECT ((col1+col2)+col3)";
+        let p = get_first_projection(sqlstmt);
+        let expr = parseexpr(&p, &ref_columns);
+        //println!("{:?}", expr);
+
+        let mut owned_columns = expr.compile(&dict, &init_dict).1;
+        expr.eval(
+            &mut owned_columns.iter_mut().collect(),
+            &(ref_columns.iter().collect()),
+            &vec![],
+            &dict,
+        );
+
+        assert!(!owned_columns.is_empty());
+        let val = owned_columns.pop().unwrap().unwrap::<Vec<u64>>();
+        assert_eq!(val, vec![12, 15, 18]);
     }
 }

@@ -13,6 +13,7 @@ pub struct ColumnWrapper {
     index: Option<Vec<usize>>,
     bitmap: Option<Bitmap>,
     typeid: TypeId,
+    typename: String,
     name: String,
 }
 
@@ -28,11 +29,13 @@ impl ColumnWrapper {
             .for_each(|b| assert_eq!((*col).len(), b.len()));
 
         let typeid = TypeId::of::<V>();
+        let typename = std::any::type_name::<V>();
         Self {
             column: Arc::new(col),
             index,
             bitmap,
             typeid,
+            typename: typename.to_string(),
             name: "".to_string(),
         }
     }
@@ -63,11 +66,22 @@ impl ColumnWrapper {
         self.typeid
     }
 
+    pub fn typename(&self) -> &String {
+        &self.typename
+    }
+
     pub fn unwrap<V>(self) -> V
     where
         V: Send + Sync + 'static,
     {
-        match Arc::try_unwrap(self.column.downcast::<V>().unwrap()) {
+        let (typename, col) = (self.typename, self.column);
+        match Arc::try_unwrap(col.downcast::<V>().unwrap_or_else(|_| {
+            panic!(
+                "Downcast failed. Source type is {}, target type is {}",
+                typename,
+                std::any::type_name::<V>()
+            )
+        })) {
             Ok(res) => res,
             _ => panic!("Downcast of Arc failed due to non-exclusive reference"),
         }
@@ -77,7 +91,13 @@ impl ColumnWrapper {
     where
         V: 'static,
     {
-        (*self.column).downcast_ref::<V>().unwrap()
+        (*self.column).downcast_ref::<V>().unwrap_or_else(|| {
+            panic!(
+                "Downcast failed. Source type is {}, target type is {}",
+                self.typename,
+                std::any::type_name::<V>()
+            )
+        })
     }
 
     pub fn downcast_mut<V>(&mut self) -> &mut V
@@ -85,9 +105,16 @@ impl ColumnWrapper {
         V: 'static,
     {
         {
-            (Arc::get_mut(&mut self.column).unwrap())
+            let (typename, col) = (&mut self.typename, &mut self.column);
+            (Arc::get_mut(col).unwrap())
                 .downcast_mut::<V>()
-                .unwrap()
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Downcast failed. Source type is {}, target type is {}",
+                        typename,
+                        std::any::type_name::<V>()
+                    )
+                })
         }
     }
     pub fn index(&self) -> &Option<Vec<usize>> {

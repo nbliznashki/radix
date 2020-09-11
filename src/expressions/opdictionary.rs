@@ -13,17 +13,10 @@ pub type OpDictionary = HashMap<Signature, Operation>;
 
 #[derive(Clone, PartialEq, Hash, Eq, Debug)]
 pub enum Binding {
-    RefColumn,
+    RefColumn(usize),
     OwnedColumn,
-    ConstValue,
+    ConstValue(usize),
     Expr(Box<Expression>),
-}
-
-#[derive(Clone, PartialEq, Hash, Eq, Debug)]
-pub struct Expression {
-    op: Signature,
-    output: Binding,
-    input: Vec<Binding>,
 }
 
 #[derive(Clone, PartialEq, Hash, Eq, Debug)]
@@ -31,16 +24,42 @@ pub struct Signature {
     op_name: String,
     output: TypeId,
     input: Vec<TypeId>,
+    output_typename: String,
+    input_typenames: Vec<String>,
 }
 
 impl Signature {
-    pub fn new(op: &str, output: TypeId, input: Vec<TypeId>) -> Self {
+    pub fn new(
+        op: &str,
+        output: TypeId,
+        input: Vec<TypeId>,
+        output_typename: String,
+        input_typenames: Vec<String>,
+    ) -> Self {
         Self {
             op_name: op.to_string(),
             output,
             input,
+            output_typename,
+            input_typenames,
         }
     }
+    pub fn new_with_output<T: 'static>(op: &str) -> Self {
+        Self {
+            op_name: op.to_string(),
+            output: TypeId::of::<T>(),
+            input: vec![],
+            output_typename: std::any::type_name::<T>().to_string(),
+            input_typenames: vec![],
+        }
+    }
+
+    pub fn add_input<T: 'static>(&mut self) {
+        self.input.push(TypeId::of::<T>());
+        self.input_typenames
+            .push(std::any::type_name::<T>().to_string());
+    }
+
     pub fn input_len(&self) -> usize {
         self.input.len()
     }
@@ -50,28 +69,39 @@ impl Signature {
     }
 
     pub fn as_output_sig(&self) -> Self {
-        Self::new("new", self.output, vec![])
+        Self {
+            op_name: "new".to_string(),
+            output: self.output,
+            input: vec![],
+            output_typename: self.output_typename.clone(),
+            input_typenames: vec![],
+        }
     }
 }
 
 #[macro_export]
 macro_rules! sig {
     ($elem:expr; $output:ty) => (
-        Signature::new(
+        Signature::new_with_output::<$output>(
             $elem,
-            TypeId::of::<$output>(),
-            vec! []
         )
         );
     ($elem:expr; $output:ty; $($x:ty),+ $(,)?) => (
-    Signature::new(
-        $elem,
-        TypeId::of::<$output>(),
-        vec! [$(TypeId::of::<$x>()),+]
-    )
+    {
+        let mut s=Signature::new_with_output::<$output>(
+            $elem,
+        );
+        $(s.add_input::<$x>();)+
+        s
+    }
     );
 }
-
+#[derive(Clone, PartialEq, Hash, Eq, Debug)]
+pub struct Expression {
+    op: Signature,
+    output: Binding,
+    input: Vec<Binding>,
+}
 impl Expression {
     pub fn new(sig: Signature, output: Binding, input: Vec<Binding>) -> Self {
         Self {
@@ -84,33 +114,38 @@ impl Expression {
     pub fn output_type(&self) -> TypeId {
         self.op.output
     }
+    pub fn output_typename(&self) -> &String {
+        &self.op.output_typename
+    }
 
     fn eval_recursive(
         &self,
-        owned_columns: &mut Vec<ColumnWrapper>,
-        ref_columns: &mut Vec<&ColumnWrapper>,
-        const_values: &mut Vec<&ColumnWrapper>,
+        owned_columns: &mut Vec<&mut ColumnWrapper>,
+        ref_columns: &Vec<&ColumnWrapper>,
+        const_values: &Vec<&ColumnWrapper>,
         dict: &OpDictionary,
     ) {
-        let mut output: ColumnWrapper = match &self.output {
+        let mut output: &mut ColumnWrapper = match &self.output {
             Binding::OwnedColumn => owned_columns.pop().unwrap(),
             Binding::Expr(expr) => {
                 (*expr).eval_recursive(owned_columns, ref_columns, const_values, dict);
                 owned_columns.pop().unwrap()
             }
-            Binding::RefColumn | Binding::ConstValue => panic!("Incorrect expression output type"),
+            Binding::RefColumn(_) | Binding::ConstValue(_) => {
+                panic!("Incorrect expression output type")
+            }
         };
 
         let input: Vec<InputTypes> = self
             .input
             .iter()
             .map(|b| match b {
-                Binding::OwnedColumn => InputTypes::Owned(owned_columns.pop().unwrap()),
-                Binding::RefColumn => InputTypes::Ref(ref_columns.pop().unwrap()),
-                Binding::ConstValue => InputTypes::Ref(const_values.pop().unwrap()),
+                Binding::OwnedColumn => InputTypes::Ref(owned_columns.pop().unwrap()),
+                Binding::RefColumn(i) => InputTypes::Ref(ref_columns[*i]),
+                Binding::ConstValue(i) => InputTypes::Ref(const_values[*i]),
                 Binding::Expr(expr) => {
                     (*expr).eval_recursive(owned_columns, ref_columns, const_values, dict);
-                    InputTypes::Owned(owned_columns.pop().unwrap())
+                    InputTypes::Ref(owned_columns.pop().unwrap())
                 }
             })
             .collect();
@@ -122,9 +157,9 @@ impl Expression {
 
     pub fn eval(
         &self,
-        owned_columns: &mut Vec<ColumnWrapper>,
-        ref_columns: &mut Vec<&ColumnWrapper>,
-        const_values: &mut Vec<&ColumnWrapper>,
+        owned_columns: &mut Vec<&mut ColumnWrapper>,
+        ref_columns: &Vec<&ColumnWrapper>,
+        const_values: &Vec<&ColumnWrapper>,
         dict: &OpDictionary,
     ) {
         self.eval_recursive(owned_columns, ref_columns, const_values, dict);
@@ -139,7 +174,7 @@ impl Expression {
         owned_columns: &mut Vec<ColumnWrapper>,
     ) {
         self.input.iter().rev().for_each(|inp| match inp {
-            Binding::OwnedColumn | Binding::RefColumn | Binding::ConstValue => {}
+            Binding::OwnedColumn | Binding::RefColumn(_) | Binding::ConstValue(_) => {}
             Binding::Expr(expr) => {
                 (*expr).compile_recursive(dict, init_dict, ops, owned_columns);
             }
@@ -155,7 +190,9 @@ impl Expression {
             Binding::Expr(expr) => {
                 (*expr).compile_recursive(dict, init_dict, ops, owned_columns);
             }
-            Binding::RefColumn | Binding::ConstValue => panic!("Incorrect expression output type"),
+            Binding::RefColumn(_) | Binding::ConstValue(_) => {
+                panic!("Incorrect expression output type")
+            }
         }
 
         let op = dict.get(&self.op).unwrap();
