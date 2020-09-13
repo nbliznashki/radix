@@ -1041,7 +1041,7 @@ mod tests {
                     let projection = &(**a).projection;
                     let selectitem = &projection[0];
                     if let SelectItem::UnnamedExpr(e) = selectitem {
-                        return e.clone();
+                        e.clone()
                     } else {
                         panic!()
                     }
@@ -1051,6 +1051,7 @@ mod tests {
             } else {
                 panic!()
             };
+            p
         }
 
         let mut dict: OpDictionary = HashMap::new();
