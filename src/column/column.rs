@@ -1,5 +1,6 @@
 use crate::bitmap::*;
 use core::any::Any;
+use std::rc::Rc;
 use std::{any::TypeId, ops::Deref};
 use std::{ops::DerefMut, sync::Arc};
 pub trait Column<V> {
@@ -11,7 +12,7 @@ pub trait Column<V> {
 enum ColumnData<'a> {
     Ref(&'a (dyn Any + Send + Sync)),
     RefMut(&'a mut (dyn Any + Send + Sync)),
-    Owned(Arc<dyn Any + Send + Sync>),
+    Owned(Box<dyn Any + Send + Sync>),
 }
 
 pub struct ColumnWrapper<'a> {
@@ -37,7 +38,7 @@ impl<'a> ColumnWrapper<'a> {
         let typeid = TypeId::of::<V>();
         let typename = std::any::type_name::<V>();
         Self {
-            column: ColumnData::Owned(Arc::new(col)),
+            column: ColumnData::Owned(Box::new(col)),
             index,
             bitmap,
             typeid,
@@ -118,7 +119,11 @@ impl<'a> ColumnWrapper<'a> {
 
         match col {
             ColumnData::Owned(col) => {
-                match Arc::try_unwrap(col.downcast::<V>().unwrap_or_else(|_| {
+                //go through Rc in order to downcast to T
+                //TO-DO: figure out if there is a smarter way to do that
+                let col: Rc<dyn Any + Send + Sync> = col.into();
+                let col: Rc<dyn Any> = col;
+                match Rc::try_unwrap(col.downcast::<V>().unwrap_or_else(|_| {
                     panic!(
                         "Downcast failed. Source type is {}, target type is {}",
                         typename,
@@ -126,23 +131,21 @@ impl<'a> ColumnWrapper<'a> {
                     )
                 })) {
                     Ok(res) => res,
-                    _ => panic!("Downcast of Arc failed due to non-exclusive reference"),
+                    _ => panic!("Downcast of Rc failed due to non-exclusive reference"),
                 }
             }
             _ => panic!("Cannot downcast a non-owned column to owned column"),
         }
     }
 
-    pub fn downcast_mut<'b, V>(&'b mut self) -> &'b mut V
+    pub fn downcast_mut<V>(&mut self) -> &mut V
     where
         V: 'static,
-        'a: 'b,
     {
         let (typename, col) = (&self.typename, &mut self.column);
-        let col_mut_ref: &mut (dyn Any + Send + Sync) = match col {
-            ColumnData::RefMut(col) => *col,
-            ColumnData::Owned(col) => Arc::get_mut(col)
-                .unwrap_or_else(|| panic!("Downcast of Arc failed due to non-exclusive reference")),
+        let col_mut_ref = match col {
+            ColumnData::RefMut(col) => &mut **col,
+            ColumnData::Owned(col) => &mut **col,
             _ => panic!("Cannot downcast a non-owned or non-ref mut column to ref mut column"),
         };
 
@@ -160,16 +163,16 @@ impl<'a> ColumnWrapper<'a> {
         V: 'static,
     {
         let (typename, col) = (&self.typename, &self.column);
-        let col_ref: &(dyn Any + Send + Sync) = match col {
-            ColumnData::Ref(col) => *col,
-            ColumnData::RefMut(col) => *col,
+        let col_ref = match col {
+            ColumnData::Ref(col) => &(**col),
+            ColumnData::RefMut(col) => &(**col),
             ColumnData::Owned(col) => &(**col),
         };
 
         col_ref.downcast_ref::<V>().unwrap_or_else(|| {
             panic!(
                 "Downcast failed. Source type is {}, target type is {}",
-                self.typename,
+                typename,
                 std::any::type_name::<V>()
             )
         })
@@ -192,16 +195,28 @@ impl<'a> ColumnWrapper<'a> {
     where
         V: 'static,
     {
-        let (col, ind, bmap) = (&mut self.column, &mut self.index, &mut self.bitmap);
+        let (col, ind, bmap, typename, typeid) = (
+            &mut self.column,
+            &mut self.index,
+            &mut self.bitmap,
+            &self.typename,
+            &self.typeid,
+        );
 
-        let col_mut_ref: &mut (dyn Any + Send + Sync) = match col {
-            ColumnData::RefMut(col) => *col,
-            ColumnData::Owned(col) => Arc::get_mut(col)
-                .unwrap_or_else(|| panic!("Downcast of Arc failed due to non-exclusive reference")),
+        let col_mut_ref = match col {
+            ColumnData::RefMut(col) => &mut (**col),
+            ColumnData::Owned(col) => &mut (**col),
+
             _ => panic!("Cannot downcast a non-owned or non-ref mut column to ref mut column"),
         };
 
-        let col = col_mut_ref.downcast_mut::<V>().unwrap();
+        let col = col_mut_ref.downcast_mut::<V>().unwrap_or_else(|| {
+            panic!(
+                "Downcast failed. Source type is {}, target type is {}",
+                typename,
+                std::any::type_name::<V>(),
+            )
+        });
         (col, ind, bmap)
     }
 }
