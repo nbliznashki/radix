@@ -1059,9 +1059,9 @@ mod tests {
         let mut init_dict: InitDictionary = HashMap::new();
         load_init_dict(&mut init_dict);
 
-        let c1 = ColumnWrapper::new_with_name(vec![4_u64, 5, 6], None, None, "col1");
-        let c2 = ColumnWrapper::new_with_name(vec![4_u32, 5, 6], None, None, "col2");
-        let c3 = ColumnWrapper::new_with_name(vec![4_u32, 5, 6], None, None, "col3");
+        let c1 = ColumnWrapper::new(vec![4_u64, 5, 6], None, None).with_name("col1");
+        let c2 = ColumnWrapper::new(vec![4_u32, 5, 6], None, None).with_name("col2");
+        let c3 = ColumnWrapper::new(vec![4_u32, 5, 6], None, None).with_name("col3");
         let ref_columns = vec![c1, c2, c3];
 
         let sqlstmt = "SELECT ((col1+col2)+col3)";

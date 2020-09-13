@@ -14,7 +14,7 @@ pub struct ColumnWrapper {
     bitmap: Option<Bitmap>,
     typeid: TypeId,
     typename: String,
-    name: String,
+    name: Option<String>,
 }
 
 impl ColumnWrapper {
@@ -36,29 +36,16 @@ impl ColumnWrapper {
             bitmap,
             typeid,
             typename: typename.to_string(),
-            name: "".to_string(),
+            name: None,
         }
     }
 
-    pub fn new_with_name<T, V>(
-        col: V,
-        index: Option<Vec<usize>>,
-        bitmap: Option<Bitmap>,
-        name: &str,
-    ) -> Self
-    where
-        V: Deref<Target = [T]>,
-        V: Send + Sync + 'static,
-    {
-        let mut cw = ColumnWrapper::new(col, index, bitmap);
-        cw.rename(name);
-        cw
-    }
-    pub fn rename(&mut self, name: &str) {
-        self.name = name.to_string()
+    pub fn with_name(mut self, name: &str) -> Self {
+        self.name = Some(name.to_string());
+        self
     }
 
-    pub fn name(&self) -> &String {
+    pub fn name(&self) -> &Option<String> {
         &self.name
     }
 

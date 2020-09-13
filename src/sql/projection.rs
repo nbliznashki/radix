@@ -22,7 +22,10 @@ fn op_name_init(op: &BinaryOperator) -> String {
 }
 
 fn column_ref<'a>(name: &str, input: &'a Vec<ColumnWrapper>) -> (&'a ColumnWrapper, usize) {
-    let pos = input.iter().position(|c| c.name() == name).unwrap();
+    let pos = input
+        .iter()
+        .position(|c| c.name().as_deref() == Some(name))
+        .unwrap();
     (&input[pos], pos)
 }
 
