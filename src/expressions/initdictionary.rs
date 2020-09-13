@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::OwnedColumn;
 use concat_idents::concat_idents;
 
-pub type InitOperation = fn() -> ColumnWrapper;
+pub type InitOperation = fn() -> ColumnWrapper<'static>;
 
 pub type InitDictionary = HashMap<Signature, InitOperation>;
 
@@ -27,7 +27,7 @@ macro_rules! binary_operation_impl {
     ($($tr:ty)+) => ($(
         concat_idents!(fn_name = new, _, vec,$tr {
             #[allow(dead_code)]
-            fn fn_name()->ColumnWrapper {
+            fn fn_name()->ColumnWrapper<'static> {
                 ColumnWrapper::new(Vec::<$tr>::new(), None, None)
             }
 

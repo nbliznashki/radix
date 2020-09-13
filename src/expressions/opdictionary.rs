@@ -4,8 +4,8 @@ use std::any::TypeId;
 use std::collections::HashMap;
 
 pub enum InputTypes<'a> {
-    Ref(&'a ColumnWrapper),
-    Owned(ColumnWrapper),
+    Ref(&'a ColumnWrapper<'a>),
+    Owned(ColumnWrapper<'static>),
 }
 
 pub type Operation = fn(&mut ColumnWrapper, Vec<InputTypes>);

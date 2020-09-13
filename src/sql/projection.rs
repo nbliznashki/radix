@@ -21,7 +21,7 @@ fn op_name_init(op: &BinaryOperator) -> String {
     op_name.to_string()
 }
 
-fn column_ref<'a>(name: &str, input: &'a Vec<ColumnWrapper>) -> (&'a ColumnWrapper, usize) {
+fn column_ref<'a>(name: &str, input: &'a Vec<ColumnWrapper>) -> (&'a ColumnWrapper<'a>, usize) {
     let pos = input
         .iter()
         .position(|c| c.name().as_deref() == Some(name))

@@ -1059,8 +1059,11 @@ mod tests {
         let mut init_dict: InitDictionary = HashMap::new();
         load_init_dict(&mut init_dict);
 
-        let c1 = ColumnWrapper::new(vec![4_u64, 5, 6], None, None).with_name("col1");
-        let c2 = ColumnWrapper::new(vec![4_u32, 5, 6], None, None).with_name("col2");
+        let data_col1 = vec![4_u64, 5, 6];
+        let mut data_col2 = vec![4_u32, 5, 6];
+
+        let c1 = ColumnWrapper::new_ref(&data_col1, None, None).with_name("col1");
+        let c2 = ColumnWrapper::new_ref_mut(&mut data_col2, None, None).with_name("col2");
         let c3 = ColumnWrapper::new(vec![4_u32, 5, 6], None, None).with_name("col3");
         let ref_columns = vec![c1, c2, c3];
 
@@ -1076,6 +1079,9 @@ mod tests {
             &vec![],
             &dict,
         );
+
+        drop(data_col2);
+        drop(data_col1);
 
         assert!(!owned_columns.is_empty());
         let val = owned_columns.pop().unwrap().unwrap::<Vec<u64>>();
