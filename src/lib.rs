@@ -5,6 +5,7 @@ mod columnflatten;
 mod columnpartition;
 mod columnrepartition;
 mod columnu8;
+mod executor;
 mod expressions;
 mod hashcolumn;
 mod hashjoin;
@@ -17,6 +18,7 @@ pub use columnflatten::*;
 pub use columnpartition::*;
 pub use columnrepartition::*;
 pub use columnu8::*;
+pub use executor::*;
 pub use expressions::*;
 pub use hashjoin::*;
 pub use sql::*;
@@ -37,6 +39,28 @@ mod tests {
     use std::rc::*;
 
     use rayon::prelude::*;
+
+    fn get_first_projection(sqlstmt: &str) -> Expr {
+        let ast = sql2ast(&sqlstmt);
+
+        let p: Expr = if let Statement::Query(a) = &ast[0] {
+            let query = &(**a);
+            if let SetExpr::Select(a) = &query.body {
+                let projection = &(**a).projection;
+                let selectitem = &projection[0];
+                if let SelectItem::UnnamedExpr(e) = selectitem {
+                    e.clone()
+                } else {
+                    panic!()
+                }
+            } else {
+                panic!()
+            }
+        } else {
+            panic!()
+        };
+        p
+    }
 
     //Validate that the function behaves the same way when given an index and when not given an index
     #[test]
@@ -1032,43 +1056,30 @@ mod tests {
 
     #[test]
     fn parse_expression() {
-        fn get_first_projection(sqlstmt: &str) -> Expr {
-            let ast = sql2ast(&sqlstmt);
-
-            let p: Expr = if let Statement::Query(a) = &ast[0] {
-                let query = &(**a);
-                if let SetExpr::Select(a) = &query.body {
-                    let projection = &(**a).projection;
-                    let selectitem = &projection[0];
-                    if let SelectItem::UnnamedExpr(e) = selectitem {
-                        e.clone()
-                    } else {
-                        panic!()
-                    }
-                } else {
-                    panic!()
-                }
-            } else {
-                panic!()
-            };
-            p
-        }
-
         let mut dict: OpDictionary = HashMap::new();
         load_op_dict(&mut dict);
         let mut init_dict: InitDictionary = HashMap::new();
         load_init_dict(&mut init_dict);
 
-        let data_col1 = vec![4_u64, 5, 6];
+        let data_col1 = vec![4_u64, 5];
         let mut data_col2 = vec![4_u32, 5, 6];
 
-        let c1 = ColumnWrapper::new_ref(&data_col1, None, None).with_name("col1");
-        let c2 = ColumnWrapper::new_ref_mut(&mut data_col2, None, None).with_name("col2");
+        let c1 =
+            ColumnWrapper::new_ref(&data_col1, Some(vec![0_usize, 0, 0]), None).with_name("col1");
+        let c2 = ColumnWrapper::new_ref_mut(
+            &mut data_col2,
+            None,
+            Some(Bitmap {
+                bits: vec![1, 1, 0],
+            }),
+        )
+        .with_name("col2");
         let c3 = ColumnWrapper::new(vec![4_u32, 5, 6], None, None).with_name("col3");
         let ref_columns = vec![c1, c2, c3];
 
         let sqlstmt = "SELECT ((col1+col2)+col3)";
         let p = get_first_projection(sqlstmt);
+        println!("{:?}", p);
         let expr = parseexpr(&p, &ref_columns);
         //println!("{:?}", expr);
 
@@ -1084,7 +1095,57 @@ mod tests {
         drop(data_col1);
 
         assert!(!owned_columns.is_empty());
-        let val = owned_columns.pop().unwrap().unwrap::<Vec<u64>>();
-        assert_eq!(val, vec![12, 15, 18]);
+        let result = owned_columns.pop().unwrap();
+        assert_eq!(result.bitmap().as_ref().unwrap().bits, vec![1, 1, 0]);
+
+        let val = result.unwrap::<Vec<u64>>();
+        assert_eq!(val, vec![12, 14, 0]);
+    }
+    #[test]
+    fn test_hash_join_expression() {
+        let mut dict: OpDictionary = HashMap::new();
+        load_op_dict(&mut dict);
+        let mut init_dict: InitDictionary = HashMap::new();
+        load_init_dict(&mut init_dict);
+
+        let data_col1 = vec![4_u64, 5];
+        let mut data_col2 = vec![4_u32, 5, 6];
+
+        let c1 =
+            ColumnWrapper::new_ref(&data_col1, Some(vec![0_usize, 0, 0]), None).with_name("col1");
+        let c2 = ColumnWrapper::new_ref_mut(
+            &mut data_col2,
+            None,
+            Some(Bitmap {
+                bits: vec![1, 1, 0],
+            }),
+        )
+        .with_name("col2");
+        let c3 = ColumnWrapper::new(vec![4_u32, 5, 6], None, None).with_name("col3");
+        let ref_columns = vec![c1, c2, c3];
+
+        let sqlstmt = "SELECT ((col1+col2)+col3)";
+        let p = get_first_projection(sqlstmt);
+        println!("{:?}", p);
+        let expr = parseexpr(&p, &ref_columns);
+        //println!("{:?}", expr);
+
+        let mut owned_columns = expr.compile(&dict, &init_dict).1;
+        expr.eval(
+            &mut owned_columns.iter_mut().collect(),
+            &(ref_columns.iter().collect()),
+            &vec![],
+            &dict,
+        );
+
+        drop(data_col2);
+        drop(data_col1);
+
+        assert!(!owned_columns.is_empty());
+        let result = owned_columns.pop().unwrap();
+        assert_eq!(result.bitmap().as_ref().unwrap().bits, vec![1, 1, 0]);
+
+        let val = result.unwrap::<Vec<u64>>();
+        assert_eq!(val, vec![12, 14, 0]);
     }
 }
