@@ -1,20 +1,28 @@
 mod bitmap;
 mod bucketcolumn;
+mod column;
 mod columnflatten;
 mod columnpartition;
 mod columnrepartition;
 mod columnu8;
+mod executor;
+mod expressions;
 mod hashcolumn;
 mod hashjoin;
 mod helpers;
-mod operations;
+mod sql;
 
 pub use bucketcolumn::*;
+pub use column::*;
 pub use columnflatten::*;
 pub use columnpartition::*;
 pub use columnrepartition::*;
 pub use columnu8::*;
+pub use executor::*;
+pub use expressions::*;
 pub use hashjoin::*;
+pub use sql::*;
+use sqlparser::ast::{Expr, Select, SelectItem, SetExpr, Statement};
 //TO-DO: Make library safe (e.g.) safe rust code outside of it can't cause UB
 
 #[cfg(test)]
@@ -22,13 +30,37 @@ mod tests {
     use crate::bitmap::*;
     use crate::bucketcolumn::*;
     use crate::columnu8::*;
+    //use crate::expressions::operations::init_dict;
     use crate::hashcolumn::*;
     use crate::*;
+    use std::{any::Any, collections::HashMap, ops::Deref, ops::DerefMut, sync::Arc};
 
     use std::collections::hash_map::RandomState;
     use std::rc::*;
 
     use rayon::prelude::*;
+
+    fn get_first_projection(sqlstmt: &str) -> Expr {
+        let ast = sql2ast(&sqlstmt);
+
+        let p: Expr = if let Statement::Query(a) = &ast[0] {
+            let query = &(**a);
+            if let SetExpr::Select(a) = &query.body {
+                let projection = &(**a).projection;
+                let selectitem = &projection[0];
+                if let SelectItem::UnnamedExpr(e) = selectitem {
+                    e.clone()
+                } else {
+                    panic!()
+                }
+            } else {
+                panic!()
+            }
+        } else {
+            panic!()
+        };
+        p
+    }
 
     //Validate that the function behaves the same way when given an index and when not given an index
     #[test]
@@ -896,5 +928,224 @@ mod tests {
         let len_before_dedup = index_combined.len();
         index_combined.dedup();
         assert_eq!(len_before_dedup, index_combined.len());
+    }
+    #[test]
+    fn sig_macro() {
+        use std::any::TypeId;
+
+        let s = sig!["add"; u64; u64, u64, u64];
+        assert_eq!(s.input_len(), 3);
+
+        let s = sig!["add"; u64];
+        assert_eq!(s.input_len(), 0);
+
+        let s1 = sig!["add"; u64; u64, u64, u64];
+        let s2 = sig!["add"; u64; u64, u64, u64];
+        assert!(s1 == s2);
+
+        let s1 = sig!["add"; u64; u64, u64, u64];
+        let s2 = sig!["sub"; u64; u64, u64, u64];
+        assert!(s1 != s2);
+
+        let s1 = sig!["add"; u64; u64, u64, u64];
+        let s2 = sig!["add"; u32; u64, u64, u64];
+        assert!(s1 != s2);
+
+        let s1 = sig!["add"; u64; u64, u64, u64];
+        let s2 = sig!["add"; u64; u64, u64, u32];
+        assert!(s1 != s2);
+
+        let s1 = sig!["add"; u64; u64, u64, u64];
+        let s2 = sig!["add"; u64; u64, u64];
+        assert!(s1 != s2);
+    }
+
+    #[test]
+    fn expression_compile() {
+        use crate::column::*;
+        use std::any::TypeId;
+
+        let mut dict: OpDictionary = HashMap::new();
+        load_op_dict(&mut dict);
+        let mut init_dict: InitDictionary = HashMap::new();
+        load_init_dict(&mut init_dict);
+
+        let s1 = sig!["+"; Vec<u32>;Vec<u32>, Vec<u32>];
+        let s2 = sig!["+"; Vec<u64>;Vec<u64>, Vec<u32>];
+        let s3 = sig!["+="; Vec<u64>;Vec<u64>];
+
+        let col1: Vec<ColumnWrapper> = vec![
+            //let col1: Vec<Arc<OwnedColumn<Vec<u64>>>> = vec![
+            ColumnWrapper::new(
+                vec![1_u32, 2, 3],
+                None,
+                Some(Bitmap {
+                    bits: vec![1, 0, 1],
+                }),
+            ),
+            ColumnWrapper::new(vec![1_u32, 2, 3], None, None),
+            ColumnWrapper::new(vec![1_u32], Some(vec![0, 0, 0]), None),
+        ];
+        let col2: Vec<ColumnWrapper> = vec![
+            ColumnWrapper::new(vec![1_u32, 3, 3], None, None),
+            ColumnWrapper::new(vec![1_u32, 3, 3], None, None),
+            ColumnWrapper::new(vec![1_u32, 3, 3], None, None),
+        ];
+
+        let col3: Vec<ColumnWrapper> = vec![
+            ColumnWrapper::new(vec![0_u64, 0, 0], None, None),
+            ColumnWrapper::new(vec![0_u64, 0, 0], None, None),
+            ColumnWrapper::new(vec![0_u64, 0, 0], None, None),
+        ];
+
+        let col4: Vec<ColumnWrapper> = vec![
+            ColumnWrapper::new(vec![4_u64, 5, 6], None, None),
+            ColumnWrapper::new(vec![4_u64, 5, 6], None, None),
+            ColumnWrapper::new(vec![4_u64, 5, 6], None, None),
+        ];
+
+        let expr: Expression = Expression::new(
+            s1,
+            Binding::OwnedColumn,
+            vec![Binding::RefColumn(0), Binding::RefColumn(1)],
+        );
+        let expr: Expression = Expression::new(
+            s2,
+            Binding::OwnedColumn,
+            vec![Binding::RefColumn(2), Binding::Expr(Box::new(expr))],
+        );
+        let expr: Expression = Expression::new(
+            s3,
+            Binding::Expr(Box::new(expr)),
+            vec![Binding::RefColumn(3)],
+        );
+
+        let (ops, mut owned_values) = expr.compile(&dict, &init_dict);
+        assert_eq!(owned_values.len(), 2);
+        assert_eq!(ops.len(), 3);
+
+        let output: Vec<_> = col1
+            .iter()
+            .zip(col2.iter())
+            .zip(col3.iter())
+            .zip(col4.iter())
+            .map(|(((c1, c2), c3), c4)| {
+                let (_, mut owned_values) = expr.compile(&dict, &init_dict);
+
+                let mut owned_values_refmut = owned_values.iter_mut().collect();
+
+                expr.eval(
+                    &mut owned_values_refmut,
+                    &vec![c1, c2, c3, c4],
+                    &vec![],
+                    &dict,
+                );
+
+                owned_values.pop().unwrap()
+            })
+            .collect();
+
+        drop(col2);
+
+        let output: Vec<Vec<u64>> = output.into_iter().map(|c| c.unwrap::<Vec<u64>>()).collect();
+
+        assert_eq!(output[0], &[6, 0, 12]);
+        assert_eq!(output[1], &[6, 10, 12]);
+        assert_eq!(output[2], &[6, 9, 10]);
+    }
+
+    #[test]
+    fn parse_expression() {
+        let mut dict: OpDictionary = HashMap::new();
+        load_op_dict(&mut dict);
+        let mut init_dict: InitDictionary = HashMap::new();
+        load_init_dict(&mut init_dict);
+
+        let data_col1 = vec![4_u64, 5];
+        let mut data_col2 = vec![4_u32, 5, 6];
+
+        let c1 =
+            ColumnWrapper::new_ref(&data_col1, Some(vec![0_usize, 0, 0]), None).with_name("col1");
+        let c2 = ColumnWrapper::new_ref_mut(
+            &mut data_col2,
+            None,
+            Some(Bitmap {
+                bits: vec![1, 1, 0],
+            }),
+        )
+        .with_name("col2");
+        let c3 = ColumnWrapper::new(vec![4_u32, 5, 6], None, None).with_name("col3");
+        let ref_columns = vec![c1, c2, c3];
+
+        let sqlstmt = "SELECT ((col1+col2)+col3)";
+        let p = get_first_projection(sqlstmt);
+        println!("{:?}", p);
+        let expr = parseexpr(&p, &ref_columns);
+        //println!("{:?}", expr);
+
+        let mut owned_columns = expr.compile(&dict, &init_dict).1;
+        expr.eval(
+            &mut owned_columns.iter_mut().collect(),
+            &(ref_columns.iter().collect()),
+            &vec![],
+            &dict,
+        );
+
+        drop(data_col2);
+        drop(data_col1);
+
+        assert!(!owned_columns.is_empty());
+        let result = owned_columns.pop().unwrap();
+        assert_eq!(result.bitmap().as_ref().unwrap().bits, vec![1, 1, 0]);
+
+        let val = result.unwrap::<Vec<u64>>();
+        assert_eq!(val, vec![12, 14, 0]);
+    }
+    #[test]
+    fn test_hash_join_expression() {
+        let mut dict: OpDictionary = HashMap::new();
+        load_op_dict(&mut dict);
+        let mut init_dict: InitDictionary = HashMap::new();
+        load_init_dict(&mut init_dict);
+
+        let data_col1 = vec![4_u64, 5];
+        let mut data_col2 = vec![4_u32, 5, 6];
+
+        let c1 =
+            ColumnWrapper::new_ref(&data_col1, Some(vec![0_usize, 0, 0]), None).with_name("col1");
+        let c2 = ColumnWrapper::new_ref_mut(
+            &mut data_col2,
+            None,
+            Some(Bitmap {
+                bits: vec![1, 1, 0],
+            }),
+        )
+        .with_name("col2");
+        let c3 = ColumnWrapper::new(vec![4_u32, 5, 6], None, None).with_name("col3");
+        let ref_columns = vec![c1, c2, c3];
+
+        let sqlstmt = "SELECT ((col1+col2)+col3)";
+        let p = get_first_projection(sqlstmt);
+        println!("{:?}", p);
+        let expr = parseexpr(&p, &ref_columns);
+        //println!("{:?}", expr);
+
+        let mut owned_columns = expr.compile(&dict, &init_dict).1;
+        expr.eval(
+            &mut owned_columns.iter_mut().collect(),
+            &(ref_columns.iter().collect()),
+            &vec![],
+            &dict,
+        );
+
+        drop(data_col2);
+        drop(data_col1);
+
+        assert!(!owned_columns.is_empty());
+        let result = owned_columns.pop().unwrap();
+        assert_eq!(result.bitmap().as_ref().unwrap().bits, vec![1, 1, 0]);
+
+        let val = result.unwrap::<Vec<u64>>();
+        assert_eq!(val, vec![12, 14, 0]);
     }
 }

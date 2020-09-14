@@ -1,9 +1,52 @@
 use crate::hashcolumn::*;
+use crate::ColumnWrapper;
 
 use std::cmp::max;
 
+pub fn join_hash<'a, 'b>(
+    lhs: Vec<&mut ColumnWrapper<'b>>,
+    rhs: Vec<&mut ColumnWrapper<'b>>,
+    key_columns_left: &Vec<usize>,
+    key_columns_right: &Vec<usize>,
+    output_columns_left: &Vec<usize>,
+    output_columns_right: &Vec<usize>,
+) -> Vec<&'a mut ColumnWrapper<'b>> {
+    //If there is nothing to return, then exit
+    if output_columns_right.is_empty() && output_columns_left.is_empty() {
+        return vec![];
+    };
+
+    //The number of key columns should be the same on left and right side
+    assert_eq!(key_columns_left.len(), key_columns_right.len());
+    //The number of key columns should be greater than 0
+    assert!(!key_columns_left.is_empty());
+
+    //The index in key_column left/right should not exceed the number of columns in the lhs/rhs vectors respectively
+    key_columns_left
+        .iter()
+        .for_each(|i| assert!(*i < lhs.len()));
+    key_columns_right
+        .iter()
+        .for_each(|i| assert!(*i < rhs.len()));
+    //The index in the output key_column left/right should not exceed the number of columns in the lhs/rhs vectors respectively
+    output_columns_left
+        .iter()
+        .for_each(|i| assert!(*i < lhs.len()));
+    output_columns_right
+        .iter()
+        .for_each(|i| assert!(*i < rhs.len()));
+
+    //Build left hash
+    let mut itr = key_columns_left.iter();
+    let hash_column = itr.next().unwrap();
+    
+
+
+    vec![]
+}
+
 //Only inner join for now
-pub fn hash_join(
+fn hash_join(
     left: &HashColumn,
     right: &HashColumn,
     outer_buckets_count: usize,
