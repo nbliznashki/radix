@@ -1,12 +1,21 @@
 use crate::bitmap::*;
 use core::any::Any;
-use std::rc::Rc;
 use std::{any::TypeId, ops::Deref};
-use std::{ops::DerefMut, sync::Arc};
 pub trait Column<V> {
     fn col(&self) -> &V;
     fn index(&self) -> &Option<Vec<usize>>;
     fn bitmap(&self) -> &Option<Bitmap>;
+}
+
+/// Source code copied from std::boxed::into_boxed_slice()
+/// As of 13.09.2020, the feature is not stabilized. Tracking issue = "71582".
+/// Converts a `Box<T>` into a `Box<[T]>`
+///
+/// This conversion does not allocate on the heap and happens in place.
+///
+fn copy_of_into_boxed_slice<T>(boxed: Box<T>) -> Box<[T]> {
+    // *mut T and *mut [T; 1] have the same size and alignment
+    unsafe { Box::from_raw(Box::into_raw(boxed) as *mut [T; 1]) }
 }
 
 enum ColumnData<'a> {
@@ -119,20 +128,18 @@ impl<'a> ColumnWrapper<'a> {
 
         match col {
             ColumnData::Owned(col) => {
-                //go through Rc in order to downcast to T
-                //TO-DO: figure out if there is a smarter way to do that
-                let col: Rc<dyn Any + Send + Sync> = col.into();
-                let col: Rc<dyn Any> = col;
-                match Rc::try_unwrap(col.downcast::<V>().unwrap_or_else(|_| {
+                let col = col as Box<dyn Any>;
+                let col = col.downcast::<V>().unwrap_or_else(|_| {
                     panic!(
                         "Downcast failed. Source type is {}, target type is {}",
                         typename,
                         std::any::type_name::<V>()
                     )
-                })) {
-                    Ok(res) => res,
-                    _ => panic!("Downcast of Rc failed due to non-exclusive reference"),
-                }
+                });
+                let col = copy_of_into_boxed_slice(col);
+                let mut res: Vec<V> = col.into();
+                let res = res.pop().unwrap();
+                res
             }
             _ => panic!("Cannot downcast a non-owned column to owned column"),
         }
@@ -218,6 +225,31 @@ impl<'a> ColumnWrapper<'a> {
             )
         });
         (col, ind, bmap)
+    }
+
+    pub fn all_unwrap<V>(self) -> (V, Option<Vec<usize>>, Option<Bitmap>)
+    where
+        V: 'static,
+    {
+        let (col, ind, bmap, typename) = (self.column, self.index, self.bitmap, self.typename);
+
+        match col {
+            ColumnData::Owned(col) => {
+                let col = col as Box<dyn Any>;
+                let col = col.downcast::<V>().unwrap_or_else(|_| {
+                    panic!(
+                        "Downcast failed. Source type is {}, target type is {}",
+                        typename,
+                        std::any::type_name::<V>()
+                    )
+                });
+                let col = copy_of_into_boxed_slice(col);
+                let mut res: Vec<V> = col.into();
+                let res = res.pop().unwrap();
+                (res, ind, bmap)
+            }
+            _ => panic!("Cannot downcast a non-owned column to owned column"),
+        }
     }
 }
 
