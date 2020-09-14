@@ -4,7 +4,7 @@ Library for parallel partitioning of vectors of data based on hash.
 Also contains an sql statements executor, e.g.:
 
 ```rust
-let mut dict: OpDictionary = HashMap::new();
+        let mut dict: OpDictionary = HashMap::new();
         load_op_dict(&mut dict);
         let mut init_dict: InitDictionary = HashMap::new();
         load_init_dict(&mut init_dict);
