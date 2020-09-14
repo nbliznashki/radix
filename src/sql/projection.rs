@@ -98,6 +98,25 @@ pub fn parseexpr_rec<'a>(expr: &Expr, input: &'a Vec<ColumnWrapper>) -> Expressi
             _ => panic!(),
         },
         Expr::Nested(e) => parseexpr_rec(&(**e), input),
+        Expr::Function(f) => {
+            if f.name.0[0].value == "hash" {
+                assert!(f.args.len() > 0);
+                let e = f.args[0].clone();
+                match e {
+                    Expr::Identifier(col) => {
+                        let (col, pos) = column_ref(&col.value, input);
+
+                        let op_name = "hash=";
+                        panic!()
+                    }
+                    _ => panic!("Only hash(col) supported"),
+                }
+
+                panic!()
+            } else {
+                panic!("Only the function hash is implemented")
+            };
+        }
         _ => panic!(),
     }
 }
