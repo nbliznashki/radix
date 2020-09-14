@@ -5,7 +5,8 @@ Also contains an sql statements executor, e.g.:
 
 ```rust
 
-        //Executes an sql statement, containing one projection
+        //Executes an sql statement, containing one projection:
+        //SELECT ((col1+col2)+col3)
         //Load operations dictionary of predefined functions
         let mut dict: OpDictionary = HashMap::new();
         load_op_dict(&mut dict);
