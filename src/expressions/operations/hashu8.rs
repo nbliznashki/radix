@@ -1,8 +1,6 @@
 use crate::bitmap::Bitmap;
 use crate::*;
 
-use core::any::TypeId;
-
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::ops::AddAssign;
 
@@ -12,8 +10,13 @@ use rayon::prelude::*;
 const OP: &str = "hash+=";
 
 pub(crate) fn load_op_dict(dict: &mut OpDictionary) {
-    let signature = sig![OP;Vec<u64>; ColumnU8];
-    dict.insert(signature, hashadd_vecu64_columnu8);
+    let signature = sig![OP; ColumnU8];
+    let op = Operation {
+        f: hashadd_vecu64_columnu8,
+        output_type: std::any::TypeId::of::<Vec<u64>>(),
+        output_typename: std::any::type_name::<Vec<u64>>().to_string(),
+    };
+    dict.insert(signature, op);
 }
 
 fn hashadd_vecu64_columnu8(output: &mut ColumnWrapper, input: Vec<InputTypes>) {
