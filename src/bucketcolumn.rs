@@ -27,7 +27,6 @@ impl BucketColumn {
         );
         BucketColumn {
             data: hash
-                .data
                 .par_iter()
                 .map(|h| (h % (buckets_count as u64)) as usize)
                 .collect(),

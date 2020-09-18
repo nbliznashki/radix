@@ -7,8 +7,14 @@ pub enum InputTypes<'a> {
     Ref(&'a ColumnWrapper<'a>),
     Owned(ColumnWrapper<'static>),
 }
+#[derive(Clone)]
+pub struct Operation {
+    pub f: fn(&mut ColumnWrapper, Vec<InputTypes>),
+    pub output_type: std::any::TypeId,
+    pub output_typename: String,
+}
 
-pub type Operation = fn(&mut ColumnWrapper, Vec<InputTypes>);
+//pub type Operation = fn(&mut ColumnWrapper, Vec<InputTypes>);
 pub type OpDictionary = HashMap<Signature, Operation>;
 
 #[derive(Clone, PartialEq, Hash, Eq, Debug)]
@@ -19,37 +25,33 @@ pub enum Binding {
     Expr(Box<Expression>),
 }
 
-#[derive(Clone, PartialEq, Hash, Eq, Debug)]
+#[derive(Clone, Hash, Debug)]
 pub struct Signature {
     op_name: String,
-    output: TypeId,
     input: Vec<TypeId>,
-    output_typename: String,
     input_typenames: Vec<String>,
 }
 
+impl PartialEq for Signature {
+    fn eq(&self, other: &Self) -> bool {
+        self.input == other.input && self.op_name == other.op_name
+    }
+}
+
+impl Eq for Signature {}
+
 impl Signature {
-    pub fn new(
-        op: &str,
-        output: TypeId,
-        input: Vec<TypeId>,
-        output_typename: String,
-        input_typenames: Vec<String>,
-    ) -> Self {
+    pub fn new(op: &str, input: Vec<TypeId>, input_typenames: Vec<String>) -> Self {
         Self {
             op_name: op.to_string(),
-            output,
             input,
-            output_typename,
             input_typenames,
         }
     }
-    pub fn new_with_output<T: 'static>(op: &str) -> Self {
+    pub fn new_op(op: &str) -> Self {
         Self {
             op_name: op.to_string(),
-            output: TypeId::of::<T>(),
             input: vec![],
-            output_typename: std::any::type_name::<T>().to_string(),
             input_typenames: vec![],
         }
     }
@@ -68,27 +70,26 @@ impl Signature {
         &self.op_name
     }
 
-    pub fn as_output_sig(&self) -> Self {
+    pub fn as_output_sig(&self, dict: &OpDictionary) -> Self {
+        let op = dict.get(&self).unwrap();
         Self {
             op_name: "new".to_string(),
-            output: self.output,
-            input: vec![],
-            output_typename: self.output_typename.clone(),
-            input_typenames: vec![],
+            input: vec![op.output_type],
+            input_typenames: vec![op.output_typename.clone()],
         }
     }
 }
 
 #[macro_export]
 macro_rules! sig {
-    ($elem:expr; $output:ty) => (
-        Signature::new_with_output::<$output>(
+    ($elem:expr) => (
+        Signature::new_op(
             $elem,
         )
         );
-    ($elem:expr; $output:ty; $($x:ty),+ $(,)?) => (
+    ($elem:expr; $($x:ty),+ $(,)?) => (
     {
-        let mut s=Signature::new_with_output::<$output>(
+        let mut s=Signature::new_op(
             $elem,
         );
         $(s.add_input::<$x>();)+
@@ -109,13 +110,6 @@ impl Expression {
             output,
             input,
         }
-    }
-
-    pub fn output_type(&self) -> TypeId {
-        self.op.output
-    }
-    pub fn output_typename(&self) -> &String {
-        &self.op.output_typename
     }
 
     fn eval_recursive(
@@ -151,7 +145,7 @@ impl Expression {
             .collect();
 
         let op = dict.get(&self.op).unwrap();
-        op(&mut output, input);
+        (op.f)(&mut output, input);
         owned_columns.push(output);
     }
 
@@ -182,7 +176,7 @@ impl Expression {
 
         match &self.output {
             Binding::OwnedColumn => {
-                let output_sig = &self.op.as_output_sig();
+                let output_sig = &self.op.as_output_sig(dict);
                 let f = init_dict.get(output_sig).unwrap();
                 owned_columns.push(f());
                 //println!("{}", output_sig.op_name())
@@ -194,9 +188,9 @@ impl Expression {
                 panic!("Incorrect expression output type")
             }
         }
-
         let op = dict.get(&self.op).unwrap();
-        ops.push(*op);
+
+        ops.push(op.clone());
     }
 
     pub fn compile(
@@ -208,5 +202,13 @@ impl Expression {
         let mut owned_columns: Vec<ColumnWrapper> = Vec::new();
         self.compile_recursive(dict, init_dict, &mut ops, &mut owned_columns);
         (ops, owned_columns)
+    }
+
+    pub fn output_type(&self, dict: &OpDictionary) -> TypeId {
+        self.op.as_output_sig(dict).input.pop().unwrap()
+    }
+
+    pub fn output_typename(&self, dict: &OpDictionary) -> String {
+        self.op.as_output_sig(dict).input_typenames.pop().unwrap()
     }
 }

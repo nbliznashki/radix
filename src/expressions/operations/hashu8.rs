@@ -1,19 +1,20 @@
 use crate::bitmap::Bitmap;
 use crate::*;
 
-use core::any::TypeId;
-
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::ops::AddAssign;
-
-use rayon::prelude::*;
 
 #[allow(dead_code)]
 const OP: &str = "hash+=";
 
 pub(crate) fn load_op_dict(dict: &mut OpDictionary) {
-    let signature = sig![OP;Vec<u64>; ColumnU8];
-    dict.insert(signature, hashadd_vecu64_columnu8);
+    let signature = sig![OP; ColumnU8];
+    let op = Operation {
+        f: hashadd_vecu64_columnu8,
+        output_type: std::any::TypeId::of::<Vec<u64>>(),
+        output_typename: std::any::type_name::<Vec<u64>>().to_string(),
+    };
+    dict.insert(signature, op);
 }
 
 fn hashadd_vecu64_columnu8(output: &mut ColumnWrapper, input: Vec<InputTypes>) {
@@ -60,9 +61,9 @@ fn hashadd_vecu64_columnu8(output: &mut ColumnWrapper, input: Vec<InputTypes>) {
 
     match (&index_input, &bitmap_input) {
         (Some(ind), None) => data_output
-            .par_iter_mut()
-            .zip_eq(
-                ind.par_iter()
+            .iter_mut()
+            .zip(
+                ind.iter()
                     .map(|i| &data[slice_start_pos[*i]..slice_start_pos[*i] + slice_len[*i]]),
             )
             .for_each(|(l, sliceu8)| {
@@ -73,12 +74,12 @@ fn hashadd_vecu64_columnu8(output: &mut ColumnWrapper, input: Vec<InputTypes>) {
                 })
             }),
         (Some(ind), Some(b_right)) => data_output
-            .par_iter_mut()
-            .zip_eq(
-                ind.par_iter()
+            .iter_mut()
+            .zip(
+                ind.iter()
                     .map(|i| &data[slice_start_pos[*i]..slice_start_pos[*i] + slice_len[*i]]),
             )
-            .zip_eq(b_right.bits.par_iter())
+            .zip(b_right.bits.iter())
             .for_each(|((l, sliceu8), b_r)| {
                 l.add_assign(if *b_r != 0 {
                     {
@@ -92,9 +93,9 @@ fn hashadd_vecu64_columnu8(output: &mut ColumnWrapper, input: Vec<InputTypes>) {
             }),
 
         (None, None) => data_output
-            .par_iter_mut()
-            .zip_eq(slice_start_pos.par_iter())
-            .zip_eq(slice_len.par_iter())
+            .iter_mut()
+            .zip(slice_start_pos.iter())
+            .zip(slice_len.iter())
             .for_each(|((l, slice_start), len)| {
                 l.add_assign({
                     let mut h = rs.build_hasher();
@@ -105,10 +106,10 @@ fn hashadd_vecu64_columnu8(output: &mut ColumnWrapper, input: Vec<InputTypes>) {
             }),
 
         (None, Some(b_right)) => data_output
-            .par_iter_mut()
-            .zip_eq(slice_start_pos.par_iter())
-            .zip_eq(slice_len.par_iter())
-            .zip_eq(b_right.bits.par_iter())
+            .iter_mut()
+            .zip(slice_start_pos.iter())
+            .zip(slice_len.iter())
+            .zip(b_right.bits.iter())
             .for_each(|(((l, slice_start), len), b_r)| {
                 l.add_assign(if *b_r != 0 {
                     {
@@ -127,7 +128,7 @@ fn hashadd_vecu64_columnu8(output: &mut ColumnWrapper, input: Vec<InputTypes>) {
             (_, None) => None,
             (None, Some(b_right)) => Some((*b_right).clone()),
             (Some(ind), Some(b_right)) => Some(Bitmap {
-                bits: ind.par_iter().map(|i| b_right.bits[*i]).collect(),
+                bits: ind.iter().map(|i| b_right.bits[*i]).collect(),
             }),
         };
     } else {
@@ -136,13 +137,13 @@ fn hashadd_vecu64_columnu8(output: &mut ColumnWrapper, input: Vec<InputTypes>) {
             (_, None) => {}
             (None, Some(b_right)) => b_left
                 .bits
-                .par_iter_mut()
-                .zip_eq(b_right.bits.par_iter())
+                .iter_mut()
+                .zip(b_right.bits.iter())
                 .for_each(|(b_l, b_r)| *b_l &= b_r),
             (Some(ind), Some(b_right)) => b_left
                 .bits
-                .par_iter_mut()
-                .zip_eq(ind.par_iter())
+                .iter_mut()
+                .zip(ind.iter())
                 .for_each(|(b_l, i)| *b_l &= b_right.bits[*i]),
         };
         *bitmap_output = Some(b_left);

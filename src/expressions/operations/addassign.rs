@@ -1,10 +1,7 @@
 use crate::bitmap::Bitmap;
-use concat_idents::concat_idents;
-use core::any::TypeId;
+use paste::paste;
 
 use std::ops::AddAssign;
-
-use rayon::prelude::*;
 
 use crate::*;
 
@@ -13,18 +10,22 @@ const OP: &str = "+=";
 
 macro_rules! operation_load {
     ($dict:ident; $(($tl:ty, $tr:ty))+) => ($(
-        concat_idents!(fn_name = addassign, _, vec,$tl,_,vec,$tr {
-            let signature=sig![OP;Vec<$tl>; Vec<$tr>];
-            $dict.insert(signature, fn_name);
-        });
+            let signature=sig![OP; Vec<$tl>, Vec<$tr>];
+            //println!("{:?}", signature);
+            let op=Operation{
+                f: paste!{[<addassign_vec $tl _ vec $tr>]},
+                output_type: std::any::TypeId::of::<Vec<$tl>>(),
+                output_typename: std::any::type_name::<Vec<$tl>>().to_string()
+            };
+            $dict.insert(signature, op);
     )+)
 }
 
 macro_rules! operation_impl {
     ($(($tl:ty, $tr:ty))+) => ($(
-        concat_idents!(fn_name = addassign, _, vec,$tl,_,vec,$tr {
+        paste! {
             #[allow(dead_code)]
-            fn fn_name(output: &mut ColumnWrapper, input: Vec<InputTypes>) {
+            fn [<addassign_vec $tl _ vec $tr>](output: &mut ColumnWrapper, input: Vec<InputTypes>) {
 
                 type T1=$tl;
                 type T2=$tr;
@@ -58,13 +59,13 @@ macro_rules! operation_impl {
 
                 match (&index_input, &bitmap_output, &bitmap_input) {
                     (Some(ind), None, None) => data_output
-                        .par_iter_mut()
-                        .zip_eq(ind.par_iter().map(|i| &data_input[*i]))
+                        .iter_mut()
+                        .zip(ind.iter().map(|i| &data_input[*i]))
                         .for_each(|(l, r)| l.add_assign( T1::from(*r))),
                     (Some(ind), Some(b_left), None) => data_output
-                        .par_iter_mut()
-                        .zip_eq(ind.par_iter().map(|i| &data_input[*i]))
-                        .zip_eq(b_left.bits.par_iter())
+                        .iter_mut()
+                        .zip(ind.iter().map(|i| &data_input[*i]))
+                        .zip(b_left.bits.iter())
                         .for_each(|((l, r), b_l)| {
                             l.add_assign( if *b_l != 0 {
                                 T1::from(*r)
@@ -73,9 +74,9 @@ macro_rules! operation_impl {
                             })
                         }),
                     (Some(ind), None, Some(b_right)) => data_output
-                        .par_iter_mut()
-                        .zip_eq(ind.par_iter().map(|i| &data_input[*i]))
-                        .zip_eq(b_right.bits.par_iter())
+                        .iter_mut()
+                        .zip(ind.iter().map(|i| &data_input[*i]))
+                        .zip(b_right.bits.iter())
                         .for_each(|((l, r), b_r)| {
                             l.add_assign(if *b_r != 0 {
                                 T1::from(*r)
@@ -84,10 +85,10 @@ macro_rules! operation_impl {
                             })
                         }),
                     (Some(ind), Some(b_left), Some(b_right)) => data_output
-                        .par_iter_mut()
-                        .zip_eq(ind.par_iter().map(|i| &data_input[*i]))
-                        .zip_eq(b_left.bits.par_iter())
-                        .zip_eq(b_right.bits.par_iter())
+                        .iter_mut()
+                        .zip(ind.iter().map(|i| &data_input[*i]))
+                        .zip(b_left.bits.iter())
+                        .zip(b_right.bits.iter())
                         .for_each(|(((l, r), b_l), b_r)| {
                             l.add_assign(if (*b_l != 0) & (*b_r != 0) {
                                 T1::from(*r)
@@ -97,13 +98,13 @@ macro_rules! operation_impl {
                         }),
 
                     (None, None, None) => data_output
-                        .par_iter_mut()
-                        .zip_eq(data_input.par_iter())
+                        .iter_mut()
+                        .zip(data_input.iter())
                         .for_each(|(l, r)| l.add_assign(T1::from(*r))),
                     (None, Some(b_left), None) => data_output
-                        .par_iter_mut()
-                        .zip_eq(data_input.par_iter())
-                        .zip_eq(b_left.bits.par_iter())
+                        .iter_mut()
+                        .zip(data_input.iter())
+                        .zip(b_left.bits.iter())
                         .for_each(|((l, r), b_l)| {
                             l.add_assign(if *b_l != 0 {
                                 T1::from(*r)
@@ -112,9 +113,9 @@ macro_rules! operation_impl {
                             })
                         }),
                     (None, None, Some(b_right)) => data_output
-                        .par_iter_mut()
-                        .zip_eq(data_input.par_iter())
-                        .zip_eq(b_right.bits.par_iter())
+                        .iter_mut()
+                        .zip(data_input.iter())
+                        .zip(b_right.bits.iter())
                         .for_each(|((l, r), b_r)| {
                             l.add_assign(if *b_r != 0 {
                                 T1::from(*r)
@@ -123,10 +124,10 @@ macro_rules! operation_impl {
                             })
                         }),
                     (None, Some(b_left), Some(b_right)) => data_output
-                        .par_iter_mut()
-                        .zip_eq(data_input.par_iter())
-                        .zip_eq(b_left.bits.par_iter())
-                        .zip_eq(b_right.bits.par_iter())
+                        .iter_mut()
+                        .zip(data_input.iter())
+                        .zip(b_left.bits.iter())
+                        .zip(b_right.bits.iter())
                         .for_each(|(((l, r), b_l), b_r)| {
                             l.add_assign(if (*b_l != 0) & (*b_r != 0) {
                                 T1::from(*r)
@@ -140,7 +141,7 @@ macro_rules! operation_impl {
                         (_, None) => None,
                         (None, Some(b_right)) => Some((*b_right).clone()),
                         (Some(ind), Some(b_right)) => Some(Bitmap {
-                            bits: ind.par_iter().map(|i| b_right.bits[*i]).collect(),
+                            bits: ind.iter().map(|i| b_right.bits[*i]).collect(),
                         }),
                     };
                 } else {
@@ -149,38 +150,29 @@ macro_rules! operation_impl {
                         (_, None) => {}
                         (None, Some(b_right)) => b_left
                             .bits
-                            .par_iter_mut()
-                            .zip_eq(b_right.bits.par_iter())
+                            .iter_mut()
+                            .zip(b_right.bits.iter())
                             .for_each(|(b_l, b_r)| *b_l &= b_r),
                         (Some(ind), Some(b_right)) => b_left
                             .bits
-                            .par_iter_mut()
-                            .zip_eq(ind.par_iter())
+                            .iter_mut()
+                            .zip(ind.iter())
                             .for_each(|(b_l, i)| *b_l &= b_right.bits[*i]),
                     };
                     *bitmap_output = Some(b_left);
                 }
             }
 
-    });
+    }
     )+)
 }
 
 operation_impl! {
-
-(u64, u64) (u64, u32) (u64, u16) (u64, u8) (u64, bool) (u32,u32)
-
+    (u64, u64) (u64, u32) (u64, u16) (u64, u8) (u64, bool) (u32,u32)
 }
 
-//{ usize u8 u16 u32 u64 u128 isize i8 i16 i32 i64 i128 f32 f64 }
-
-//operation_impl! { (u64,u8) (u64,u16) (u64,u32) (u64,u64) }
-
 pub(crate) fn load_op_dict(dict: &mut OpDictionary) {
-    //dict.insert(s, columnadd_onwedcolumnvecu64_vecu64);7
     operation_load! {dict;
-
             (u64, u64) (u64, u32) (u64, u16) (u64, u8) (u64, bool) (u32,u32)
-
     };
 }

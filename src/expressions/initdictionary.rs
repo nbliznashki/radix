@@ -1,9 +1,8 @@
 use crate::Signature;
-use std::any::{Any, TypeId};
+
 use std::collections::HashMap;
 
-use crate::OwnedColumn;
-use concat_idents::concat_idents;
+use paste::paste;
 
 pub type InitOperation = fn() -> ColumnWrapper<'static>;
 
@@ -16,22 +15,21 @@ const OP: &str = "new";
 
 macro_rules! binary_operation_load {
     ($dict:ident; $($tr:ty)+) => ($(
-        concat_idents!(fn_name = new, _, vec,$tr {
             let signature=sig![OP;Vec<$tr>];
-            $dict.insert(signature, fn_name);
-        });
+            $dict.insert(signature, paste!{[<new_vec $tr>]});
     )+)
 }
 
 macro_rules! binary_operation_impl {
     ($($tr:ty)+) => ($(
-        concat_idents!(fn_name = new, _, vec,$tr {
+        paste!{
+
             #[allow(dead_code)]
-            fn fn_name()->ColumnWrapper<'static> {
+            fn [<new_vec $tr>]()->ColumnWrapper<'static> {
                 ColumnWrapper::new(Vec::<$tr>::new(), None, None)
             }
 
-    });
+        }
     )+)
 }
 

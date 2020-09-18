@@ -1,6 +1,7 @@
-use crate::bitmap::*;
+use crate::{bitmap::*, ColumnIndex};
 use core::any::Any;
 use std::{any::TypeId, ops::Deref};
+
 pub trait Column<V> {
     fn col(&self) -> &V;
     fn index(&self) -> &Option<Vec<usize>>;
@@ -18,15 +19,17 @@ fn copy_of_into_boxed_slice<T>(boxed: Box<T>) -> Box<[T]> {
     unsafe { Box::from_raw(Box::into_raw(boxed) as *mut [T; 1]) }
 }
 
-enum ColumnData<'a> {
+#[derive(Debug)]
+pub(crate) enum ColumnData<'a> {
     Ref(&'a (dyn Any + Send + Sync)),
     RefMut(&'a mut (dyn Any + Send + Sync)),
     Owned(Box<dyn Any + Send + Sync>),
 }
 
+#[derive(Debug)]
 pub struct ColumnWrapper<'a> {
     column: ColumnData<'a>,
-    index: Option<Vec<usize>>,
+    index: ColumnIndex,
     bitmap: Option<Bitmap>,
     typeid: TypeId,
     typename: String,
@@ -202,7 +205,7 @@ impl<'a> ColumnWrapper<'a> {
     where
         V: 'static,
     {
-        let (col, ind, bmap, typename, typeid) = (
+        let (col, ind, bmap, typename, _typeid) = (
             &mut self.column,
             &mut self.index,
             &mut self.bitmap,
@@ -250,6 +253,29 @@ impl<'a> ColumnWrapper<'a> {
             }
             _ => panic!("Cannot downcast a non-owned column to owned column"),
         }
+    }
+
+    ///Applies a sub-index to a column.
+    ///Let's say we have a column with an index, and we want to iterate
+    ///Over it using a different index, e.g.
+    ///Originally:
+    ///data=["a", "b", "c"], index=[0,0,1] --> Output: "a", "a", "b"
+    ///However, now we want to iterate over the output, and only take the 0th and 2nd item:
+    ///subindex=[0,2]--> Output: "a", "b"
+    ///This function replaces the orginal index [0,0,1] with a new index [0,1].
+    ///The orginial index is returned.
+    ///This functionality is needed for joining tables, where we need a mechanism to index
+    ///an already indexed column for a second time.
+
+    pub fn re_index(&mut self, index: &Vec<usize>) -> ColumnIndex {
+        let current_index = self.index_mut().take();
+
+        let v = match &current_index {
+            Some(cur_ind) => index.iter().map(|i| cur_ind[*i]).collect(),
+            None => index.clone(),
+        };
+        *self.index_mut() = Some(v);
+        current_index
     }
 }
 
