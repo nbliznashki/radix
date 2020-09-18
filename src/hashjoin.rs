@@ -8,9 +8,9 @@ pub fn hash_join(
     right: &HashColumn,
     outer_buckets_count: usize,
 ) -> (Vec<usize>, Vec<usize>) {
-    let len_left = left.data.len();
+    let len_left = left.len();
 
-    let len_right = right.data.len();
+    let len_right = right.len();
     if len_left == 0 || len_right == 0 {
         (vec![], vec![])
     } else {
@@ -21,8 +21,7 @@ pub fn hash_join(
 
         let predicted_len = max(len_right, len_left);
 
-        left.data
-            .iter()
+        left.iter()
             .enumerate()
             .filter(|(_, value)| *value & 1 == 0)
             .map(|(i, value)| (i + 1, value >> (num_bits_to_shift)))
@@ -38,7 +37,6 @@ pub fn hash_join(
 
         while vhash_sum > 0 {
             right
-                .data
                 .iter()
                 .enumerate()
                 .filter(|(_, value)| *value & 1 == 0)
@@ -46,7 +44,7 @@ pub fn hash_join(
                 .for_each(|(i, value_orig, value)| {
                     let bucket_id = (value as usize) & (buckets_num - 1);
                     let reference_index = vhash[bucket_id];
-                    if reference_index > 0 && left.data[reference_index - 1] == *value_orig {
+                    if reference_index > 0 && left[reference_index - 1] == *value_orig {
                         res_left.push(reference_index - 1);
                         res_right.push(i - 1);
                     }

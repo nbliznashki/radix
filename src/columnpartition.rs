@@ -78,11 +78,7 @@ pub trait ColumnPartition<V, T> {
             };
         }
 
-        HashColumn {
-            data: data_hash,
-            //index: index.clone(),
-            bitmap: bitmap_hash,
-        }
+        HashColumn::new(data_hash, bitmap_hash)
     }
     fn hash_column_append<S>(
         &self,
@@ -112,15 +108,14 @@ pub trait ColumnPartition<V, T> {
         };
 
         if let Some(index) = index {
-            assert_eq!(index.len(), h.data.len());
+            assert_eq!(index.len(), h.len());
         } else {
-            assert_eq!(data.len(), h.data.len());
+            assert_eq!(data.len(), h.len());
         };
 
         if let Some(bitmap_hash) = &bitmap_hash {
             match &index {
                 None => h
-                    .data
                     .par_iter_mut()
                     .zip_eq(data.par_iter())
                     .zip_eq(bitmap_hash.bits.par_iter())
@@ -134,7 +129,6 @@ pub trait ColumnPartition<V, T> {
                         }
                     }),
                 Some(index) => h
-                    .data
                     .par_iter_mut()
                     .zip_eq(index.par_iter())
                     .zip_eq(bitmap_hash.bits.par_iter())
@@ -150,19 +144,16 @@ pub trait ColumnPartition<V, T> {
             };
         } else {
             match &index {
-                None => {
-                    h.data
-                        .par_iter_mut()
-                        .zip_eq(data.par_iter())
-                        .for_each(|(current_hash, t)| {
-                            let mut h = s.build_hasher();
-                            t.hash(&mut h);
-                            *current_hash = current_hash.wrapping_add(h.finish());
-                        })
-                }
+                None => h
+                    .par_iter_mut()
+                    .zip_eq(data.par_iter())
+                    .for_each(|(current_hash, t)| {
+                        let mut h = s.build_hasher();
+                        t.hash(&mut h);
+                        *current_hash = current_hash.wrapping_add(h.finish());
+                    }),
                 Some(index) => {
-                    h.data
-                        .par_iter_mut()
+                    h.par_iter_mut()
                         .zip_eq(index.par_iter())
                         .for_each(|(current_hash, i)| {
                             let mut h = s.build_hasher();
@@ -174,11 +165,11 @@ pub trait ColumnPartition<V, T> {
         };
 
         if let Some(mut bitmap_hash) = bitmap_hash {
-            if let Some(bitmap_current) = &h.bitmap {
+            if let Some(bitmap_current) = &h.bitmap() {
                 bitmap_hash &= &bitmap_current;
             };
 
-            h.bitmap = Some(bitmap_hash);
+            *h.bitmap_mut() = Some(bitmap_hash);
         };
     }
 

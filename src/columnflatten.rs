@@ -12,7 +12,7 @@ pub trait ColumnFlatten<T> {
     where
         T: Send + Sync;
 
-    fn flatten(self, index: &ColumnIndexFlattenMap) -> FlattenedColumn<T>
+    fn flatten_column(self, index: &ColumnIndexFlattenMap) -> FlattenedColumn<T>
     where
         T: Send + Sync,
         T: Clone;
@@ -202,7 +202,7 @@ impl<T> ColumnFlatten<T> for PartitionedColumn<T> {
         }
     }
 
-    fn flatten(self, indexmap: &ColumnIndexFlattenMap) -> FlattenedColumn<T>
+    fn flatten_column(self, indexmap: &ColumnIndexFlattenMap) -> FlattenedColumn<T>
     where
         T: Send + Sync,
         T: Clone,
