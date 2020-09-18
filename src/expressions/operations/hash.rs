@@ -1,6 +1,5 @@
 use crate::bitmap::Bitmap;
-use concat_idents::concat_idents;
-use core::any::TypeId;
+use paste::paste;
 
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::ops::AddAssign;
@@ -14,18 +13,23 @@ const OP: &str = "hash+=";
 
 macro_rules! binary_operation_load {
     ($dict:ident; $($tr:ty)+) => ($(
-        concat_idents!(fn_name = hashadd, _, vecu64,_,vec,$tr {
-            let signature=sig![OP;Vec<u64>; Vec<$tr>];
-            $dict.insert(signature, fn_name);
-        });
+
+            let signature=sig![OP; Vec<$tr>];
+            let op=Operation{
+                f: paste!{[<hashadd_vecu64_vec_ $tr>]},
+                output_type: std::any::TypeId::of::<Vec<u64>>(),
+                output_typename: std::any::type_name::<Vec<u64>>().to_string()
+            };
+            $dict.insert(signature, op);
+
     )+)
 }
 
 macro_rules! binary_operation_impl {
     ($($tr:ty)+) => ($(
-        concat_idents!(fn_name = hashadd, _, vecu64,_,vec,$tr {
             #[allow(dead_code)]
-            fn fn_name(output: &mut ColumnWrapper, input: Vec<InputTypes>) {
+            paste!{
+                fn [<hashadd_vecu64_vec_ $tr>](output: &mut ColumnWrapper, input: Vec<InputTypes>) {
 
                 let rs=ahash::RandomState::with_seeds(1234,5678);
 
@@ -120,7 +124,7 @@ macro_rules! binary_operation_impl {
                 }
             }
 
-    });
+    }
     )+)
 }
 
