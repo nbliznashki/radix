@@ -113,12 +113,12 @@ macro_rules! operation_impl {
                     },
                     (None, Some(ind_rhs), None)=>{
                         data_output.extend(
-                            data_input_lhs.iter().zip(ind_rhs.iter()).map(|(lv, ri)| (*lv).ge(&T1::from(data_input_lhs[*ri])))
+                            data_input_lhs.iter().zip(ind_rhs.iter()).map(|(lv, ri)| (*lv).ge(&T1::from(data_input_rhs[*ri])))
                         );
                     },
                     (Some(ind_lhs), Some(ind_rhs), None)=>{
                         data_output.extend(
-                            ind_lhs.iter().zip(ind_rhs.iter()).map(|(li, ri)| (data_input_lhs[*li]).ge(&T1::from(data_input_lhs[*ri])))
+                            ind_lhs.iter().zip(ind_rhs.iter()).map(|(li, ri)| (data_input_lhs[*li]).ge(&T1::from(data_input_rhs[*ri])))
                         );
                     },
 
@@ -157,7 +157,7 @@ macro_rules! operation_impl {
                             .zip(bits.iter())
                             .map(|((lv, ri),b)|
                                 if *b!=0 {
-                                    (*lv).ge(&T1::from(data_input_lhs[*ri]))
+                                    (*lv).ge(&T1::from(data_input_rhs[*ri]))
                                 } else {Default::default()}
                         )
                         );
@@ -170,7 +170,7 @@ macro_rules! operation_impl {
                             .zip(bits.iter())
                             .map(|((li, ri),b)|
                                 if *b!=0 {
-                                    (data_input_lhs[*li]).ge(&T1::from(data_input_lhs[*ri]))
+                                    (data_input_lhs[*li]).ge(&T1::from(data_input_rhs[*ri]))
                                 } else {Default::default()}
                             )
                         );
@@ -190,12 +190,12 @@ macro_rules! operation_impl {
 }
 
 operation_impl! {
-    (u64, u64) (u64, u32) (u64, u16) (u64, u8) (u64, bool) (u32,u32)
+    (u64, u64) (u64, u32) (u64, u16) (u64, u8) (u64, bool) (u32,u32) (usize, usize)
 }
 
 pub(crate) fn load_op_dict(dict: &mut OpDictionary) {
     //dict.insert(s, columnadd_onwedcolumnvecu64_vecu64);7
     operation_load! {dict;
-            (u64, u64) (u64, u32) (u64, u16) (u64, u8) (u64, bool) (u32,u32)
+            (u64, u64) (u64, u32) (u64, u16) (u64, u8) (u64, bool) (u32,u32) (usize, usize)
     };
 }

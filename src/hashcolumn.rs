@@ -10,17 +10,17 @@ use std::{
 pub type HashData = Vec<u64>;
 
 #[derive(Debug)]
-pub struct HashColumn {
-    pub(crate) data: ColumnWrapper<'static>,
+pub struct HashColumn<'a> {
+    pub(crate) data: ColumnWrapper<'a>,
 }
 
-impl From<HashColumn> for ColumnWrapper<'static> {
-    fn from(hash: HashColumn) -> Self {
+impl<'a> From<HashColumn<'a>> for ColumnWrapper<'a> {
+    fn from(hash: HashColumn<'a>) -> Self {
         hash.data
     }
 }
 
-impl<'a> TryFrom<ColumnWrapper<'a>> for HashColumn {
+impl<'a> TryFrom<ColumnWrapper<'a>> for HashColumn<'a> {
     type Error = &'static str;
     fn try_from(c: ColumnWrapper<'a>) -> Result<Self, Self::Error> {
         if c.index().is_some() {
@@ -37,25 +37,31 @@ impl<'a> TryFrom<ColumnWrapper<'a>> for HashColumn {
     }
 }
 
-impl Deref for HashColumn {
+impl<'a> Deref for HashColumn<'a> {
     type Target = Vec<u64>;
     fn deref(&self) -> &Self::Target {
         self.data.downcast_ref::<HashData>()
     }
 }
 
-impl DerefMut for HashColumn {
+impl<'a> DerefMut for HashColumn<'a> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.data.downcast_mut::<HashData>()
     }
 }
 
-impl HashColumn {
+impl<'a> HashColumn<'a> {
     pub fn new(data: Vec<u64>, bitmap: Option<Bitmap>) -> Self {
         Self {
             data: ColumnWrapper::new(data, None, bitmap),
         }
     }
+    pub fn new_ref(data: &'a Vec<u64>, bitmap: Option<Bitmap>) -> Self {
+        Self {
+            data: ColumnWrapper::new_ref(data, None, bitmap),
+        }
+    }
+
     pub fn bitmap(&self) -> &Option<Bitmap> {
         self.data.bitmap()
     }

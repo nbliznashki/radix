@@ -35,7 +35,7 @@ macro_rules! binary_operation_impl {
 
 binary_operation_impl! {
 
-u64 u32 u16 u8 bool
+u64 u32 u16 u8 bool usize
 
 }
 
@@ -47,7 +47,7 @@ pub fn load_init_dict(init_dict: &mut InitDictionary) {
     //dict.insert(s, columnadd_onwedcolumnvecu64_vecu64);7
     binary_operation_load! {init_dict;
 
-        u64 u32 u16 u8 bool
+        u64 u32 u16 u8 bool usize
 
     };
 }

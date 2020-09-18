@@ -6,6 +6,8 @@ fn op_name(op: &BinaryOperator) -> String {
         BinaryOperator::Plus => "+=",
         BinaryOperator::Minus => "-=",
         BinaryOperator::Eq => "===",
+        BinaryOperator::GtEq => ">==",
+        BinaryOperator::Gt => ">==",
         _ => panic!(),
     };
     op_name.to_string()
@@ -16,6 +18,8 @@ fn op_name_init(op: &BinaryOperator) -> String {
         BinaryOperator::Plus => "+",
         BinaryOperator::Minus => "-",
         BinaryOperator::Eq => "==",
+        BinaryOperator::GtEq => ">=",
+        BinaryOperator::Gt => ">",
         _ => panic!(),
     };
     op_name.to_string()
