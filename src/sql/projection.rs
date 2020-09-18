@@ -1,7 +1,5 @@
 use crate::*;
-use core::iter::once;
 use sqlparser::ast::{BinaryOperator, Expr};
-use std::any::TypeId;
 
 fn op_name(op: &BinaryOperator) -> String {
     let op_name = match op {
@@ -109,15 +107,13 @@ pub fn parseexpr_rec<'a>(
                 let e = f.args[0].clone();
                 match e {
                     Expr::Identifier(col) => {
-                        let (col, pos) = column_ref(&col.value, input);
+                        let (_col, _pos) = column_ref(&col.value, input);
 
-                        let op_name = "hash=";
+                        let _op_name = "hash=";
                         panic!()
                     }
                     _ => panic!("Only hash(col) supported"),
                 }
-
-                panic!()
             } else {
                 panic!("Only the function hash is implemented")
             };

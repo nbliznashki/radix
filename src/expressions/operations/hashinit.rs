@@ -3,8 +3,6 @@ use paste::paste;
 
 use std::hash::{BuildHasher, Hash, Hasher};
 
-use rayon::prelude::*;
-
 use crate::*;
 
 #[allow(dead_code)]
@@ -60,15 +58,15 @@ macro_rules! binary_operation_impl {
 
 
                 match (&index_input, &bitmap_input) {
-                    (Some(ind), None) => data_output.par_extend(
-                        ind.par_iter().map(|i| &data_input[*i])
+                    (Some(ind), None) => data_output.extend(
+                        ind.iter().map(|i| &data_input[*i])
                         .map(|r|  {
                             let mut h=rs.build_hasher();
                             r.hash(&mut h); h.finish()
                         })),
-                    (Some(ind), Some(b_right)) => data_output.par_extend(
-                        ind.par_iter().map(|i| &data_input[*i])
-                        .zip_eq(b_right.bits.par_iter())
+                    (Some(ind), Some(b_right)) => data_output.extend(
+                        ind.iter().map(|i| &data_input[*i])
+                        .zip(b_right.bits.iter())
                         .map(|(r, b_r)| {
                             if *b_r != 0 {
                                 {let mut h=rs.build_hasher(); r.hash(&mut h); h.finish()}
@@ -77,13 +75,13 @@ macro_rules! binary_operation_impl {
                             }
                         })),
 
-                    (None, None) => data_output.par_extend(
-                        data_input.par_iter()
+                    (None, None) => data_output.extend(
+                        data_input.iter()
                         .map(|r| {let mut h=rs.build_hasher(); r.hash(&mut h); h.finish()})),
 
-                    (None, Some(b_right)) => data_output.par_extend(
-                        data_input.par_iter()
-                        .zip_eq(b_right.bits.par_iter())
+                    (None, Some(b_right)) => data_output.extend(
+                        data_input.iter()
+                        .zip(b_right.bits.iter())
                         .map(|(r, b_r)| {
                             if *b_r != 0 {
                                 {let mut h=rs.build_hasher(); r.hash(&mut h); h.finish()}
@@ -95,9 +93,9 @@ macro_rules! binary_operation_impl {
 
                 if let Some(bmap)=&bitmap_input{
                     if let Some(ind)=&index_input{
-                        *bitmap_output=Some(Bitmap{bits: ind.par_iter().map(|i| bmap.bits[*i]).collect()});
+                        *bitmap_output=Some(Bitmap{bits: ind.iter().map(|i| bmap.bits[*i]).collect()});
                     } else {
-                        *bitmap_output=Some(Bitmap{bits: bmap.bits.par_iter().map(|i| *i).collect()});
+                        *bitmap_output=Some(Bitmap{bits: bmap.bits.iter().map(|i| *i).collect()});
                     }
                 }
             }

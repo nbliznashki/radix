@@ -22,7 +22,6 @@ pub use executor::*;
 pub use expressions::*;
 pub use hashjoin::*;
 pub use sql::*;
-use sqlparser::ast::{Expr, Select, SelectItem, SetExpr, Statement};
 //TO-DO: Make library safe (e.g.) safe rust code outside of it can't cause UB
 
 #[cfg(test)]
@@ -33,12 +32,13 @@ mod tests {
     //use crate::expressions::operations::init_dict;
     use crate::hashcolumn::*;
     use crate::*;
-    use std::{any::Any, collections::HashMap, ops::Deref, ops::DerefMut, sync::Arc};
+    use std::{collections::HashMap, ops::Deref};
 
     use std::collections::hash_map::RandomState;
     use std::rc::*;
 
     use rayon::prelude::*;
+    use sqlparser::ast::{Expr, SelectItem, SetExpr, Statement};
 
     fn get_first_projection(sqlstmt: &str) -> Expr {
         let ast = sql2ast(&sqlstmt);
@@ -352,7 +352,7 @@ mod tests {
 
         let hash = hash.partition_column(&None, &None, &bmap);
 
-        let hash = if let PartitionedColumn::FixedLenType(hash_inner, index, bitmap) = hash {
+        let hash = if let PartitionedColumn::FixedLenType(hash_inner, _index, _bitmap) = hash {
             hash_inner
         } else {
             panic!()
@@ -450,7 +450,7 @@ mod tests {
         let hash = HashColumn::new(data, None);
 
         let hash = hash.partition_column(&None, &None, &bmap);
-        let hash = if let PartitionedColumn::FixedLenType(hash_inner, index, bitmap) = hash {
+        let hash = if let PartitionedColumn::FixedLenType(hash_inner, _index, _bitmap) = hash {
             hash_inner
         } else {
             panic!()
@@ -467,7 +467,7 @@ mod tests {
         let b = BucketColumnPartitioned::from_hash(hash, 2);
         let mut bmap = BucketsSizeMapPartitioned::from_bucket_column(b);
 
-        let part = if let PartitionedColumn::VariableLenType(part_inner, index, bitmap) = part {
+        let part = if let PartitionedColumn::VariableLenType(part_inner, _index, _bitmap) = part {
             part_inner
         } else {
             panic!()
@@ -679,7 +679,7 @@ mod tests {
 
         let part = strvec.partition_column(&None, &None, &bmap);
         let part_index = match &part {
-            PartitionedColumn::VariableLenType(columnu8, index, bitmap) => {
+            PartitionedColumn::VariableLenType(columnu8, _index, _bitmap) => {
                 let v: ColumnIndexPartitioned = columnu8.par_iter().map(|_| None).collect();
                 v
             }
@@ -740,7 +740,7 @@ mod tests {
 
         let part = strvec.partition_column(&None, &None, &bmap);
         let part_index = match &part {
-            PartitionedColumn::VariableLenType(columnu8, index, bitmap) => {
+            PartitionedColumn::VariableLenType(columnu8, _index, _bitmap) => {
                 let v: ColumnIndexPartitioned = columnu8.par_iter().map(|_| None).collect();
                 v
             }
@@ -799,7 +799,7 @@ mod tests {
 
         let part = data.partition_column(&None, &None, &bmap);
         let part_index = match &part {
-            PartitionedColumn::FixedLenType(column, index, bitmap) => {
+            PartitionedColumn::FixedLenType(column, _index, _bitmap) => {
                 let v: ColumnIndexPartitioned = column.par_iter().map(|_| None).collect();
                 v
             }
@@ -1001,7 +1001,7 @@ mod tests {
             vec![Binding::RefColumn(3)],
         );
 
-        let (ops, mut owned_values) = expr.compile(&dict, &init_dict);
+        let (ops, owned_values) = expr.compile(&dict, &init_dict);
         assert_eq!(owned_values.len(), 2);
         assert_eq!(ops.len(), 3);
 

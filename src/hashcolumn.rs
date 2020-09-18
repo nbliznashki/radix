@@ -1,5 +1,5 @@
+use crate::columnu8::*;
 use crate::{bitmap::*, ColumnWrapper};
-use crate::{columnu8::*, ColumnData};
 
 use std::{
     any::TypeId,

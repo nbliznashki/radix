@@ -1,4 +1,4 @@
-use crate::{hashcolumn::*, ColumnIndex, InitDictionary, OpDictionary};
+use crate::{hashcolumn::*, InitDictionary, OpDictionary};
 use crate::{ColumnWrapper, Expression};
 
 use std::cmp::max;
@@ -90,7 +90,6 @@ pub fn build_ind(
             });
             vhash_sum = vhash.iter().map(|i| (*i != 0) as usize).sum();
         }
-        println!("{:?} {:?} ", res_left, res_right);
         (res_left, res_right)
     }
 }

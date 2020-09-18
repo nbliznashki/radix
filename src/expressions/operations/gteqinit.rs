@@ -4,13 +4,13 @@ use paste::paste;
 use crate::*;
 
 #[allow(dead_code)]
-const OP: &str = "==";
+const OP: &str = ">=";
 
 macro_rules! operation_load {
     ($dict:ident; $(($tl:ty, $tr:ty))+) => ($(
             let signature=sig![OP;Vec<$tl>, Vec<$tr>];
             let op=Operation{
-                f: paste!{[<eq_vec $tl _ vec $tr>]},
+                f: paste!{[<ge_vec $tl _ vec $tr>]},
                 output_type: std::any::TypeId::of::<Vec<bool>>(),
                 output_typename: std::any::type_name::<Vec<bool>>().to_string()
             };
@@ -22,7 +22,7 @@ macro_rules! operation_impl {
     ($(($tl:ty, $tr:ty))+) => ($(
         paste! {
             #[allow(dead_code)]
-            fn [<eq_vec $tl _ vec $tr>](output: &mut ColumnWrapper, input: Vec<InputTypes>) {
+            fn [<ge_vec $tl _ vec $tr>](output: &mut ColumnWrapper, input: Vec<InputTypes>) {
 
                 type T1=$tl;
                 type T2=$tr;
@@ -103,22 +103,22 @@ macro_rules! operation_impl {
                 match (index_input_lhs, index_input_rhs, &bits_new){
                     (None, None, None)=>{
                         data_output.extend(
-                            data_input_lhs.iter().zip(data_input_rhs.iter()).map(|(lv, rv)| lv.eq(&T1::from(*rv)))
+                            data_input_lhs.iter().zip(data_input_rhs.iter()).map(|(lv, rv)| lv.ge(&T1::from(*rv)))
                         );
                     },
                     (Some(ind_lhs), None, None)=>{
                         data_output.extend(
-                            ind_lhs.iter().zip(data_input_rhs.iter()).map(|(li, rv)| (data_input_lhs[*li]).eq(&T1::from(*rv)))
+                            ind_lhs.iter().zip(data_input_rhs.iter()).map(|(li, rv)| (data_input_lhs[*li]).ge(&T1::from(*rv)))
                         );
                     },
                     (None, Some(ind_rhs), None)=>{
                         data_output.extend(
-                            data_input_lhs.iter().zip(ind_rhs.iter()).map(|(lv, ri)| (*lv).eq(&T1::from(data_input_lhs[*ri])))
+                            data_input_lhs.iter().zip(ind_rhs.iter()).map(|(lv, ri)| (*lv).ge(&T1::from(data_input_lhs[*ri])))
                         );
                     },
                     (Some(ind_lhs), Some(ind_rhs), None)=>{
                         data_output.extend(
-                            ind_lhs.iter().zip(ind_rhs.iter()).map(|(li, ri)| (data_input_lhs[*li]).eq(&T1::from(data_input_lhs[*ri])))
+                            ind_lhs.iter().zip(ind_rhs.iter()).map(|(li, ri)| (data_input_lhs[*li]).ge(&T1::from(data_input_lhs[*ri])))
                         );
                     },
 
@@ -131,7 +131,7 @@ macro_rules! operation_impl {
                             .zip(bits.iter())
                             .map(|((lv, rv), b)|
                                 if *b!=0 {
-                                    (*lv).eq(&T1::from(*rv))
+                                    (*lv).ge(&T1::from(*rv))
                                 } else {Default::default()}
                             )
                         );
@@ -144,7 +144,7 @@ macro_rules! operation_impl {
                             .zip(bits.iter())
                             .map(|((li, rv), b)|
                                 if *b!=0 {
-                                    (data_input_lhs[*li]).eq(&T1::from(*rv))
+                                    (data_input_lhs[*li]).ge(&T1::from(*rv))
                                 }   else {Default::default()}
                             )
                         );
@@ -157,7 +157,7 @@ macro_rules! operation_impl {
                             .zip(bits.iter())
                             .map(|((lv, ri),b)|
                                 if *b!=0 {
-                                    (*lv).eq(&T1::from(data_input_lhs[*ri]))
+                                    (*lv).ge(&T1::from(data_input_lhs[*ri]))
                                 } else {Default::default()}
                         )
                         );
@@ -170,7 +170,7 @@ macro_rules! operation_impl {
                             .zip(bits.iter())
                             .map(|((li, ri),b)|
                                 if *b!=0 {
-                                    (data_input_lhs[*li]).eq(&T1::from(data_input_lhs[*ri]))
+                                    (data_input_lhs[*li]).ge(&T1::from(data_input_lhs[*ri]))
                                 } else {Default::default()}
                             )
                         );

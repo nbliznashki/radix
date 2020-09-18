@@ -3,8 +3,6 @@ use paste::paste;
 
 use std::ops::Add;
 
-use rayon::prelude::*;
-
 use crate::*;
 
 #[allow(dead_code)]
@@ -76,25 +74,25 @@ macro_rules! operation_impl {
 
                     if let Some(bitm_lhs)=&bitmap_input_lhs{
                         if let Some(ind_lhs)=&index_input_lhs{
-                            v.par_extend(ind_lhs.par_iter().map(|i| bitm_lhs.bits[*i]))
+                            v.extend(ind_lhs.iter().map(|i| bitm_lhs.bits[*i]))
                         } else {
-                            v.par_extend(bitm_lhs.bits.par_iter())
+                            v.extend(bitm_lhs.bits.iter())
                         }
                     };
                     if v.len()==0 {
                         if let Some(bitm_rhs)=&bitmap_input_rhs{
                             if let Some(ind_rhs)=&index_input_rhs{
-                              v.par_extend(ind_rhs.par_iter().map(|i| bitm_rhs.bits[*i]))
+                              v.extend(ind_rhs.iter().map(|i| bitm_rhs.bits[*i]))
                             } else {
-                              v.par_extend(bitm_rhs.bits.par_iter())
+                              v.extend(bitm_rhs.bits.iter())
                             }
                         };
                     } else {
                         if let Some(bitm_rhs)=&bitmap_input_rhs{
                             if let Some(ind_rhs)=&index_input_rhs{
-                              v.par_iter_mut().zip_eq(ind_rhs.par_iter()).for_each(|(b,i)| *b&=bitm_rhs.bits[*i])
+                              v.iter_mut().zip(ind_rhs.iter()).for_each(|(b,i)| *b&=bitm_rhs.bits[*i])
                             } else {
-                                v.par_iter_mut().zip_eq(bitm_rhs.bits.par_iter()).for_each(|(b,bl)| *b&=*bl)
+                                v.iter_mut().zip(bitm_rhs.bits.iter()).for_each(|(b,bl)| *b&=*bl)
                             }
                         };
                     }
@@ -106,33 +104,33 @@ macro_rules! operation_impl {
 
                 match (index_input_lhs, index_input_rhs, &bits_new){
                     (None, None, None)=>{
-                        data_output.par_extend(
-                            data_input_lhs.par_iter().zip_eq(data_input_rhs.par_iter()).map(|(lv, rv)| (*lv).add(T1::from(*rv)))
+                        data_output.extend(
+                            data_input_lhs.iter().zip(data_input_rhs.iter()).map(|(lv, rv)| (*lv).add(T1::from(*rv)))
                         );
                     },
                     (Some(ind_lhs), None, None)=>{
-                        data_output.par_extend(
-                            ind_lhs.par_iter().zip_eq(data_input_rhs.par_iter()).map(|(li, rv)| (data_input_lhs[*li]).add(T1::from(*rv)))
+                        data_output.extend(
+                            ind_lhs.iter().zip(data_input_rhs.iter()).map(|(li, rv)| (data_input_lhs[*li]).add(T1::from(*rv)))
                         );
                     },
                     (None, Some(ind_rhs), None)=>{
-                        data_output.par_extend(
-                            data_input_lhs.par_iter().zip_eq(ind_rhs.par_iter()).map(|(lv, ri)| (*lv).add(T1::from(data_input_lhs[*ri])))
+                        data_output.extend(
+                            data_input_lhs.iter().zip(ind_rhs.iter()).map(|(lv, ri)| (*lv).add(T1::from(data_input_lhs[*ri])))
                         );
                     },
                     (Some(ind_lhs), Some(ind_rhs), None)=>{
-                        data_output.par_extend(
-                            ind_lhs.par_iter().zip_eq(ind_rhs.par_iter()).map(|(li, ri)| (data_input_lhs[*li]).add(T1::from(data_input_lhs[*ri])))
+                        data_output.extend(
+                            ind_lhs.iter().zip(ind_rhs.iter()).map(|(li, ri)| (data_input_lhs[*li]).add(T1::from(data_input_lhs[*ri])))
                         );
                     },
 
 
                     (None, None, Some(bits))=>{
-                        data_output.par_extend(
+                        data_output.extend(
                             data_input_lhs
-                            .par_iter()
-                            .zip_eq(data_input_rhs.par_iter())
-                            .zip_eq(bits.par_iter())
+                            .iter()
+                            .zip(data_input_rhs.iter())
+                            .zip(bits.iter())
                             .map(|((lv, rv), b)|
                                 if *b!=0 {
                                     (*lv).add(T1::from(*rv))
@@ -141,11 +139,11 @@ macro_rules! operation_impl {
                         );
                     },
                     (Some(ind_lhs), None, Some(bits))=>{
-                        data_output.par_extend(
+                        data_output.extend(
                             ind_lhs
-                            .par_iter()
-                            .zip_eq(data_input_rhs.par_iter())
-                            .zip_eq(bits.par_iter())
+                            .iter()
+                            .zip(data_input_rhs.iter())
+                            .zip(bits.iter())
                             .map(|((li, rv), b)|
                                 if *b!=0 {
                                     (data_input_lhs[*li]).add(T1::from(*rv))
@@ -154,11 +152,11 @@ macro_rules! operation_impl {
                         );
                     },
                     (None, Some(ind_rhs), Some(bits))=>{
-                        data_output.par_extend(
+                        data_output.extend(
                             data_input_lhs
-                            .par_iter()
-                            .zip_eq(ind_rhs.par_iter())
-                            .zip_eq(bits.par_iter())
+                            .iter()
+                            .zip(ind_rhs.iter())
+                            .zip(bits.iter())
                             .map(|((lv, ri),b)|
                                 if *b!=0 {
                                     (*lv).add(T1::from(data_input_lhs[*ri]))
@@ -167,11 +165,11 @@ macro_rules! operation_impl {
                         );
                     },
                     (Some(ind_lhs), Some(ind_rhs), Some(bits))=>{
-                        data_output.par_extend(
+                        data_output.extend(
                             ind_lhs
-                            .par_iter()
-                            .zip_eq(ind_rhs.par_iter())
-                            .zip_eq(bits.par_iter())
+                            .iter()
+                            .zip(ind_rhs.iter())
+                            .zip(bits.iter())
                             .map(|((li, ri),b)|
                                 if *b!=0 {
                                     (data_input_lhs[*li]).add(T1::from(data_input_lhs[*ri]))

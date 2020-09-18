@@ -3,6 +3,7 @@ use crate::expressions::opdictionary::OpDictionary;
 pub mod addassign;
 pub mod addinit;
 pub mod eqinit;
+pub mod gteqinit;
 pub mod hash;
 pub mod hashinit;
 pub mod hashu8;
@@ -16,4 +17,5 @@ pub fn load_op_dict(dict: &mut OpDictionary) {
     hashu8::load_op_dict(dict);
     addinit::load_op_dict(dict);
     eqinit::load_op_dict(dict);
+    gteqinit::load_op_dict(dict);
 }

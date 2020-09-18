@@ -205,7 +205,7 @@ impl<'a> ColumnWrapper<'a> {
     where
         V: 'static,
     {
-        let (col, ind, bmap, typename, typeid) = (
+        let (col, ind, bmap, typename, _typeid) = (
             &mut self.column,
             &mut self.index,
             &mut self.bitmap,
