@@ -1,7 +1,7 @@
 use crate::bitmap::*;
 use crate::bucketcolumn::*;
+use crate::column::hashcolumn::*;
 use crate::columnu8::*;
-use crate::hashcolumn::*;
 use rayon::prelude::*;
 use std::cell::UnsafeCell;
 use std::hash::{BuildHasher, Hash, Hasher};

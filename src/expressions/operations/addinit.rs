@@ -12,7 +12,7 @@ macro_rules! operation_load {
     ($dict:ident; $(($tl:ty, $tr:ty))+) => ($(
             let signature=sig![OP;Vec<$tl>, Vec<$tr>];
             let op=Operation{
-                f: paste!{[<add_vec $tl _ vec $tr>]},
+                f: paste!{[<add_vec $tl:lower _ vec $tr:lower>]},
                 output_type: std::any::TypeId::of::<Vec<$tl>>(),
                 output_typename: std::any::type_name::<Vec<$tl>>().to_string()
             };
@@ -24,7 +24,7 @@ macro_rules! operation_impl {
     ($(($tl:ty, $tr:ty))+) => ($(
         paste! {
             #[allow(dead_code)]
-            fn [<add_vec $tl _ vec $tr>](output: &mut ColumnWrapper, input: Vec<InputTypes>) {
+            fn [<add_vec $tl:lower _ vec $tr:lower>](output: &mut ColumnWrapper, input: Vec<InputTypes>) {
 
                 type T1=$tl;
                 type T2=$tr;

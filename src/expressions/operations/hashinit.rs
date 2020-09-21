@@ -12,7 +12,7 @@ macro_rules! binary_operation_load {
     ($dict:ident; $($tr:ty)+) => ($(
             let signature=sig![OP;Vec<$tr>];
             let op=Operation{
-                f: paste!{[<hash_vecu64_vec_ $tr>]},
+                f: paste!{[<hash_vecu64_vec_ $tr:lower>]},
                 output_type: std::any::TypeId::of::<Vec<u64>>(),
                 output_typename: std::any::type_name::<Vec<u64>>().to_string()
             };
@@ -24,7 +24,7 @@ macro_rules! binary_operation_impl {
     ($($tr:ty)+) => ($(
             #[allow(dead_code)]
             paste!{
-            fn [<hash_vecu64_vec_ $tr>](output: &mut ColumnWrapper, input: Vec<InputTypes>)  {
+            fn [<hash_vecu64_vec_ $tr:lower>](output: &mut ColumnWrapper, input: Vec<InputTypes>)  {
 
                 let rs=ahash::RandomState::with_seeds(1234,5678);
 
@@ -106,7 +106,7 @@ macro_rules! binary_operation_impl {
 
 binary_operation_impl! {
 
-u64 u32 u16 u8 bool usize
+u64 u32 u16 u8 bool usize String
 
 }
 
@@ -118,7 +118,7 @@ pub(crate) fn load_op_dict(dict: &mut OpDictionary) {
     //dict.insert(s, columnadd_onwedcolumnvecu64_vecu64);7
     binary_operation_load! {dict;
 
-        u64 u32 u16 u8 bool usize
+        u64 u32 u16 u8 bool usize String
 
     };
 }

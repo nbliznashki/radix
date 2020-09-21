@@ -6,8 +6,8 @@ use std::ops::Deref;
 
 use crate::bitmap::*;
 use crate::bucketcolumn::*;
+use crate::column::hashcolumn::*;
 use crate::columnu8::*;
-use crate::hashcolumn::*;
 
 pub trait ColumnPartition<V, T> {
     fn get_col(&self) -> &V;
