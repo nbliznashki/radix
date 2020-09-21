@@ -1,5 +1,5 @@
 use crate::columnu8::*;
-use crate::{bitmap::*, ColumnWrapper};
+use crate::{bitmap::*, ColumnWrapper, InputTypes, OpDictionary, Signature};
 
 use std::{
     any::TypeId,
@@ -67,6 +67,28 @@ impl<'a> HashColumn<'a> {
     }
     pub fn bitmap_mut(&mut self) -> &mut Option<Bitmap> {
         self.data.bitmap_mut()
+    }
+
+    pub fn hash_c(c: &ColumnWrapper, dict: &OpDictionary) -> Self {
+        let v: HashData = Vec::new();
+        let signature = Signature::new("hash=", vec![c.typeid()], vec![c.typename().clone()]);
+        let op = dict
+            .get(&signature)
+            .unwrap_or_else(|| panic!("Operation not found in dictionary: {:?}", signature));
+        let mut output = ColumnWrapper::<'static>::new(v, None, None);
+        (op.f)(&mut output, vec![InputTypes::Ref(c)]);
+        HashColumn::<'static>::try_from(output)
+            .unwrap_or_else(|_| panic!("Failed to convert a ColumnWrapper to HashColumn"))
+    }
+
+    pub fn hashadd_c(&mut self, c: &ColumnWrapper, dict: &OpDictionary) {
+        let v: HashData = Vec::new();
+        let signature = Signature::new("hash+=", vec![c.typeid()], vec![c.typename().clone()]);
+        let op = dict
+            .get(&signature)
+            .unwrap_or_else(|| panic!("Operation not found in dictionary: {:?}", signature));
+        let mut output = ColumnWrapper::<'static>::new(v, None, None);
+        (op.f)(&mut self.data, vec![InputTypes::Ref(c)]);
     }
 }
 

@@ -1,4 +1,4 @@
-use crate::hashcolumn::*;
+use crate::column::hashcolumn::*;
 
 use std::cmp::max;
 

@@ -4,6 +4,8 @@ use paste::paste;
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::ops::AddAssign;
 
+use crate::column::hashcolumn::HashData;
+
 use crate::*;
 
 #[allow(dead_code)]
@@ -14,7 +16,7 @@ macro_rules! binary_operation_load {
 
             let signature=sig![OP; Vec<$tr>];
             let op=Operation{
-                f: paste!{[<hashadd_vecu64_vec_ $tr>]},
+                f: paste!{[<hashadd_vecu64_vec_ $tr:lower>]},
                 output_type: std::any::TypeId::of::<Vec<u64>>(),
                 output_typename: std::any::type_name::<Vec<u64>>().to_string()
             };
@@ -27,7 +29,7 @@ macro_rules! binary_operation_impl {
     ($($tr:ty)+) => ($(
             #[allow(dead_code)]
             paste!{
-                fn [<hashadd_vecu64_vec_ $tr>](output: &mut ColumnWrapper, input: Vec<InputTypes>) {
+                fn [<hashadd_vecu64_vec_ $tr:lower>](output: &mut ColumnWrapper, input: Vec<InputTypes>) {
 
                 let rs=ahash::RandomState::with_seeds(1234,5678);
 
@@ -39,7 +41,7 @@ macro_rules! binary_operation_impl {
                 //right[0]-->input
                 //if right[0] and right[1]-> input_lhs, input_rhs
 
-                let (data_output, index_output, bitmap_output) = output.all_mut::<Vec<T1>>();
+                let (data_output, index_output, bitmap_output) = output.all_mut::<HashData>();
 
                 let (data_input, index_input, bitmap_input) = match &input[0] {
                     InputTypes::Ref(a)=>(a.downcast_ref::<Vec<T2>>(), a.index().as_ref(), a.bitmap().as_ref()),
@@ -128,7 +130,7 @@ macro_rules! binary_operation_impl {
 
 binary_operation_impl! {
 
-u64 u32 u16 u8 bool usize
+u64 u32 u16 u8 bool usize String
 
 }
 
@@ -140,6 +142,6 @@ pub(crate) fn load_op_dict(dict: &mut OpDictionary) {
     //dict.insert(s, columnadd_onwedcolumnvecu64_vecu64);7
     binary_operation_load! {dict;
 
-        u64 u32 u16 u8 bool usize
+        u64 u32 u16 u8 bool usize String
     };
 }

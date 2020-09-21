@@ -1,7 +1,7 @@
 use rayon::prelude::*;
 use std::ops::Deref;
 
-use crate::hashcolumn::*;
+use crate::column::hashcolumn::*;
 
 pub struct BucketColumn<'a> {
     //TO-DO: Implement Drop in parallel
@@ -71,7 +71,7 @@ impl BucketColumnPartitioned {
     }
 }
 
-pub struct BucketsSizeMap<'a> {
+pub struct BucketsSizeMap {
     //TO-DO: Implement Drop in parallel
     pub(crate) data: Vec<Vec<usize>>, //workers_count x bucket_count
     pub(crate) workers_count: usize,
@@ -80,18 +80,17 @@ pub struct BucketsSizeMap<'a> {
     pub(crate) bucket_column: Vec<usize>,
     pub(crate) offsets: Vec<Vec<usize>>,
     pub(crate) bucket_sizes: Vec<usize>,
-    pub(crate) hash: HashColumn<'a>,
 }
 
-impl<'a> Deref for BucketsSizeMap<'a> {
+impl Deref for BucketsSizeMap {
     type Target = Vec<Vec<usize>>;
     fn deref(&self) -> &Self::Target {
         &self.data
     }
 }
 
-impl<'a> BucketsSizeMap<'a> {
-    pub fn from_bucket_column(bc: BucketColumn<'a>, workers_count: usize) -> Self {
+impl BucketsSizeMap {
+    pub fn from_bucket_column(bc: BucketColumn, workers_count: usize) -> Self {
         let chunk_len = (bc.len() + workers_count - 1) / workers_count;
         let bmap: Vec<Vec<usize>> = bc
             .par_chunks(chunk_len)
@@ -127,7 +126,6 @@ impl<'a> BucketsSizeMap<'a> {
             bucket_column: bc.data,
             offsets,
             bucket_sizes,
-            hash: bc.hash,
         }
     }
 }
