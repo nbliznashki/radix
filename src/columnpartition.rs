@@ -12,7 +12,12 @@ use crate::hashcolumn::*;
 pub trait ColumnPartition<V, T> {
     fn get_col(&self) -> &V;
     fn get_col_mut(&mut self) -> &mut V;
-    fn hash_column<S>(&self, index: &ColumnIndex, bitmap: &Option<Bitmap>, s: &S) -> HashColumn
+    fn hash_column<'a, S>(
+        &self,
+        index: &ColumnIndex,
+        bitmap: &Option<Bitmap>,
+        s: &S,
+    ) -> HashColumn<'a>
     where
         S: BuildHasher + Sync,
         V: Deref<Target = [T]>,

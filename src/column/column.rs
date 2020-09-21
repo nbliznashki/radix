@@ -1,4 +1,4 @@
-use crate::{bitmap::*, ColumnIndex};
+use crate::{bitmap::*, ColumnIndex, ColumnU8};
 use core::any::Any;
 use std::{any::TypeId, ops::Deref};
 
@@ -61,14 +61,13 @@ impl<'a> ColumnWrapper<'a> {
 
     pub fn new_ref<T, V>(col: &'a V, index: Option<Vec<usize>>, bitmap: Option<Bitmap>) -> Self
     where
-        V: Deref<Target = [T]>,
         V: Send + Sync + 'static,
+        V: Deref<Target = [T]>,
     {
         //Validate that the bitmap and the data have the same length
         bitmap
             .iter()
             .for_each(|b| assert_eq!((*col).len(), b.len()));
-
         let typeid = TypeId::of::<V>();
         let typename = std::any::type_name::<V>();
         Self {
@@ -87,8 +86,8 @@ impl<'a> ColumnWrapper<'a> {
         bitmap: Option<Bitmap>,
     ) -> Self
     where
-        V: Deref<Target = [T]>,
         V: Send + Sync + 'static,
+        V: Deref<Target = [T]>,
     {
         //Validate that the bitmap and the data have the same length
         bitmap
@@ -106,6 +105,29 @@ impl<'a> ColumnWrapper<'a> {
             name: None,
         }
     }
+
+    pub fn new_ref_u8(
+        col: &'a ColumnU8,
+        index: Option<Vec<usize>>,
+        bitmap: Option<Bitmap>,
+    ) -> Self {
+        //Validate that the bitmap and the data have the same length
+        bitmap
+            .iter()
+            .for_each(|b| assert_eq!((*col).len.len(), b.len()));
+
+        let typeid = TypeId::of::<ColumnU8>();
+        let typename = std::any::type_name::<ColumnU8>();
+        Self {
+            column: ColumnData::Ref(col),
+            index,
+            bitmap,
+            typeid,
+            typename: typename.to_string(),
+            name: None,
+        }
+    }
+
     pub fn with_name(mut self, name: &str) -> Self {
         self.name = Some(name.to_string());
         self

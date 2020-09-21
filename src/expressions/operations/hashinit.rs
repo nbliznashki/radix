@@ -106,7 +106,7 @@ macro_rules! binary_operation_impl {
 
 binary_operation_impl! {
 
-u64 u32 u16 u8 bool
+u64 u32 u16 u8 bool usize
 
 }
 
@@ -118,7 +118,7 @@ pub(crate) fn load_op_dict(dict: &mut OpDictionary) {
     //dict.insert(s, columnadd_onwedcolumnvecu64_vecu64);7
     binary_operation_load! {dict;
 
-        u64 u32 u16 u8 bool
+        u64 u32 u16 u8 bool usize
 
     };
 }
