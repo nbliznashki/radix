@@ -1128,72 +1128,6 @@ mod tests {
                RefMut(&'a mut (dyn Any + Send + Sync)),
         */
 
-        trait SliceAny {
-            fn type_id(&self) -> std::any::TypeId;
-            fn len(&self) -> usize;
-            fn as_slice_ptr(&self) -> *const u8;
-            fn as_slice_mut_ptr(&mut self) -> *mut u8;
-        }
-
-        impl<T: 'static> SliceAny for [T] {
-            fn type_id(&self) -> std::any::TypeId {
-                std::any::TypeId::of::<T>()
-            }
-            fn len(&self) -> usize {
-                self.len()
-            }
-            fn as_slice_ptr(&self) -> *const u8 {
-                self.as_ptr() as *const u8
-            }
-            fn as_slice_mut_ptr(&mut self) -> *mut u8 {
-                self.as_mut_ptr() as *mut u8
-            }
-        }
-
-        impl dyn SliceAny {
-            pub fn is<T: std::any::Any>(&self) -> bool {
-                // Get `TypeId` of the type this function is instantiated with.
-                let t = std::any::TypeId::of::<T>();
-
-                // Get `TypeId` of the type in the trait object (`self`).
-                let concrete = self.type_id();
-
-                // Compare both `TypeId`s on equality.
-                t == concrete
-            }
-            pub fn downcast_ref<T: std::any::Any>(&self) -> Option<&[T]> {
-                if self.is::<T>() {
-                    let ptr = self.as_slice_ptr();
-                    let len = self.len();
-                    // SAFETY: just checked whether we are pointing to the correct type, and we can rely on
-                    // that check for memory safety because we have implemented Any for all types; no other
-                    // impls can exist as they would conflict with our impl.
-                    unsafe {
-                        let ptr = ptr as *const T;
-                        Some(std::slice::from_raw_parts(ptr, len))
-                    }
-                } else {
-                    None
-                }
-            }
-
-            pub fn downcast_mut<T: std::any::Any>(&mut self) -> Option<&mut [T]> {
-                if self.is::<T>() {
-                    let ptr = self.as_slice_mut_ptr();
-                    let len = self.len();
-                    // SAFETY: just checked whether we are pointing to the correct type, and we can rely on
-                    // that check for memory safety because we have implemented Any for all types; no other
-                    // impls can exist as they would conflict with our impl.
-                    unsafe {
-                        let ptr = ptr as *mut T;
-                        Some(std::slice::from_raw_parts_mut(ptr, len))
-                    }
-                } else {
-                    None
-                }
-            }
-        }
-
         let mut dict: OpDictionary = HashMap::new();
         load_op_dict(&mut dict);
         let mut init_dict: InitDictionary = HashMap::new();
@@ -1239,6 +1173,13 @@ mod tests {
         assert_eq!(c2.index(), &c2_index_orig);
         let mut t: Vec<u64> = vec![1, 2, 3, 4, 5];
         let (l, r) = t.split_at_mut(3);
+        let mut srm = SliceRefMut::new(l);
+        let a = srm.downcast_mut::<[u64]>().unwrap();
+        a[1] = 7;
+        drop(a);
+        l[0] = 6;
+        drop(l);
+        t.iter().for_each(|i| println!("{}", i));
         //let v = unsafe { slice_to_vec(l) };
     }
 }

@@ -1,4 +1,4 @@
-use crate::{bitmap::*, ColumnIndex, ColumnU8};
+use crate::{bitmap::*, ColumnIndex, ColumnU8, SliceMarker, SliceRef, SliceRefMut};
 use core::any::Any;
 use std::{any::TypeId, ops::Deref};
 
@@ -24,6 +24,8 @@ pub(crate) enum ColumnData<'a> {
     Ref(&'a (dyn Any + Send + Sync)),
     RefMut(&'a mut (dyn Any + Send + Sync)),
     Owned(Box<dyn Any + Send + Sync>),
+    SliceRef(SliceRef<'a>),
+    SliceRefMut(SliceRefMut<'a>),
 }
 
 #[derive(Debug)]
@@ -199,6 +201,7 @@ impl<'a> ColumnWrapper<'a> {
             ColumnData::Ref(col) => &(**col),
             ColumnData::RefMut(col) => &(**col),
             ColumnData::Owned(col) => &(**col),
+            _=>panic!("downcast_ref can only be used with Ref, RefMut, and Owned variants of ColumnWrapper")
         };
 
         col_ref.downcast_ref::<V>().unwrap_or_else(|| {
@@ -208,6 +211,82 @@ impl<'a> ColumnWrapper<'a> {
                 std::any::type_name::<V>()
             )
         })
+    }
+
+    pub fn downcast_slice_ref<V: SliceMarker<V> + ?Sized>(
+        &self,
+    ) -> &[<V as SliceMarker<V>>::Element]
+    where
+        <V as SliceMarker<V>>::Element: 'static,
+    {
+        let (typename, col) = (&self.typename, &self.column);
+        let col_ref_downcasted = match col {
+            ColumnData::SliceRef(col) => col.downcast_ref::<V>(),
+            ColumnData::SliceRefMut(col) => col.downcast_ref::<V>(),
+            _=>panic!("downcast_slice_ref can only be used with SliceRef and SliceRefMut variants of ColumnWrapper")
+        };
+
+        col_ref_downcasted.unwrap_or_else(|| {
+            panic!(
+                "Slice downcast failed. Source type is {}, target type is {}",
+                typename,
+                std::any::type_name::<[<V as SliceMarker<V>>::Element]>()
+            )
+        })
+    }
+
+    pub fn downcast_slice_mut<V: SliceMarker<V> + ?Sized>(
+        &mut self,
+    ) -> &mut [<V as SliceMarker<V>>::Element]
+    where
+        <V as SliceMarker<V>>::Element: 'static,
+    {
+        let (typename, col) = (&mut self.typename, &mut self.column);
+        let col_ref_downcasted = match  col {
+            ColumnData::SliceRefMut(col) => col.downcast_mut::<V>(),
+            _=>panic!("downcast_slice_ref can only be used with SliceRef and SliceRefMut variants of ColumnWrapper")
+        };
+
+        col_ref_downcasted.unwrap_or_else(|| {
+            panic!(
+                "Slice downcast failed. Source type is {}, target type is {}",
+                typename,
+                std::any::type_name::<[<V as SliceMarker<V>>::Element]>()
+            )
+        })
+    }
+
+    pub fn slice_all_mut<V: SliceMarker<V> + ?Sized>(
+        &mut self,
+    ) -> (
+        &mut [<V as SliceMarker<V>>::Element],
+        &mut Option<Vec<usize>>,
+        &mut Option<Bitmap>,
+    )
+    where
+        <V as SliceMarker<V>>::Element: 'static,
+    {
+        let (col, ind, bmap, typename, _typeid) = (
+            &mut self.column,
+            &mut self.index,
+            &mut self.bitmap,
+            &self.typename,
+            &self.typeid,
+        );
+
+        let col_ref_downcasted = match col {
+            ColumnData::SliceRefMut(col) => col.downcast_mut::<V>(),
+            _=>panic!("downcast_slice_ref can only be used with SliceRef and SliceRefMut variants of ColumnWrapper")
+        };
+
+        let col = col_ref_downcasted.unwrap_or_else(|| {
+            panic!(
+                "Slice downcast failed. Source type is {}, target type is {}",
+                typename,
+                std::any::type_name::<[<V as SliceMarker<V>>::Element]>(),
+            )
+        });
+        (col, ind, bmap)
     }
 
     pub fn index(&self) -> &Option<Vec<usize>> {
