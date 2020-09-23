@@ -56,7 +56,7 @@ impl Signature {
         }
     }
 
-    pub fn add_input<T: 'static>(&mut self) {
+    pub fn add_input<T: 'static + ?Sized>(&mut self) {
         self.input.push(TypeId::of::<T>());
         self.input_typenames
             .push(std::any::type_name::<T>().to_string());

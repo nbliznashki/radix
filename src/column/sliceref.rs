@@ -8,18 +8,18 @@ pub(crate) struct SliceRef<'a> {
     phantom: std::marker::PhantomData<&'a u8>,
 }
 
-pub trait SliceMarker<V: ?Sized> {
+pub unsafe trait SliceMarker<V: ?Sized> {
     type Element;
 }
 
-impl<T: 'static> SliceMarker<[T]> for [T] {
+unsafe impl<T: 'static + Sync> SliceMarker<[T]> for [T] {
     type Element = T;
 }
 
 impl<'a> SliceRef<'a> {
     pub(crate) fn new<T>(s: &'a [T]) -> Self
     where
-        T: 'static,
+        T: 'static + Sync,
     {
         SliceRef {
             type_id: std::any::TypeId::of::<[T]>(),
@@ -30,7 +30,7 @@ impl<'a> SliceRef<'a> {
     }
     pub(crate) fn is<V: SliceMarker<V> + ?Sized>(&self) -> bool
     where
-        <V as SliceMarker<V>>::Element: 'static,
+        <V as SliceMarker<V>>::Element: 'static + Sync,
     {
         // Get `TypeId` of the type this function is instantiated with.
         let t = std::any::TypeId::of::<[<V as SliceMarker<V>>::Element]>();
@@ -45,7 +45,7 @@ impl<'a> SliceRef<'a> {
         &self,
     ) -> Option<&[<V as SliceMarker<V>>::Element]>
     where
-        <V as SliceMarker<V>>::Element: 'static,
+        <V as SliceMarker<V>>::Element: 'static + Sync,
     {
         if self.is::<V>() {
             let ptr = self.ptr;
@@ -77,7 +77,7 @@ pub(crate) struct SliceRefMut<'a> {
 impl<'a> SliceRefMut<'a> {
     pub(crate) fn new<T>(s: &'a mut [T]) -> Self
     where
-        T: 'static,
+        T: 'static + Sync,
     {
         SliceRefMut {
             type_id: std::any::TypeId::of::<[T]>(),
@@ -88,7 +88,7 @@ impl<'a> SliceRefMut<'a> {
     }
     pub(crate) fn is<V: SliceMarker<V> + ?Sized>(&self) -> bool
     where
-        <V as SliceMarker<V>>::Element: 'static,
+        <V as SliceMarker<V>>::Element: 'static + Sync,
     {
         // Get `TypeId` of the type this function is instantiated with.
         let t = std::any::TypeId::of::<[<V as SliceMarker<V>>::Element]>();
@@ -103,7 +103,7 @@ impl<'a> SliceRefMut<'a> {
         &mut self,
     ) -> Option<&mut [<V as SliceMarker<V>>::Element]>
     where
-        <V as SliceMarker<V>>::Element: 'static,
+        <V as SliceMarker<V>>::Element: 'static + Sync,
     {
         if self.is::<V>() {
             let ptr = self.ptr;
@@ -123,7 +123,7 @@ impl<'a> SliceRefMut<'a> {
         &self,
     ) -> Option<&[<V as SliceMarker<V>>::Element]>
     where
-        <V as SliceMarker<V>>::Element: 'static,
+        <V as SliceMarker<V>>::Element: 'static + Sync,
     {
         if self.is::<V>() {
             let ptr = self.ptr;

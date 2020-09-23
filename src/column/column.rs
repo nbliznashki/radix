@@ -82,6 +82,37 @@ impl<'a> ColumnWrapper<'a> {
         }
     }
 
+    /*
+        pub(crate) fn new<T>(s: &'a [T]) -> Self
+    where
+        T: 'static + Sync,
+    {
+        SliceRef {
+            type_id: std::any::TypeId::of::<[T]>(),
+            len: s.len(),
+            ptr: s.as_ptr() as *const u8,
+            phantom: PhantomData,
+        }
+    }
+    */
+    pub fn new_slice<T>(col: &'a [T], index: Option<Vec<usize>>, bitmap: Option<Bitmap>) -> Self
+    where
+        T: 'static + Sync,
+    {
+        //Validate that the bitmap and the data have the same length
+
+        let typeid = TypeId::of::<[T]>();
+        let typename = std::any::type_name::<[T]>();
+        Self {
+            column: ColumnData::SliceRef(SliceRef::new::<T>(col)),
+            index,
+            bitmap,
+            typeid,
+            typename: typename.to_string(),
+            name: None,
+        }
+    }
+
     pub fn new_ref_mut<T, V>(
         col: &'a mut V,
         index: Option<Vec<usize>>,
@@ -100,6 +131,28 @@ impl<'a> ColumnWrapper<'a> {
         let typename = std::any::type_name::<V>();
         Self {
             column: ColumnData::RefMut(col),
+            index,
+            bitmap,
+            typeid,
+            typename: typename.to_string(),
+            name: None,
+        }
+    }
+
+    pub fn new_slice_mut<T>(
+        col: &'a mut [T],
+        index: Option<Vec<usize>>,
+        bitmap: Option<Bitmap>,
+    ) -> Self
+    where
+        T: 'static + Sync,
+    {
+        //Validate that the bitmap and the data have the same length
+
+        let typeid = TypeId::of::<[T]>();
+        let typename = std::any::type_name::<[T]>();
+        Self {
+            column: ColumnData::SliceRefMut(SliceRefMut::new::<T>(col)),
             index,
             bitmap,
             typeid,
@@ -217,7 +270,7 @@ impl<'a> ColumnWrapper<'a> {
         &self,
     ) -> &[<V as SliceMarker<V>>::Element]
     where
-        <V as SliceMarker<V>>::Element: 'static,
+        <V as SliceMarker<V>>::Element: 'static + Sync,
     {
         let (typename, col) = (&self.typename, &self.column);
         let col_ref_downcasted = match col {
@@ -239,7 +292,7 @@ impl<'a> ColumnWrapper<'a> {
         &mut self,
     ) -> &mut [<V as SliceMarker<V>>::Element]
     where
-        <V as SliceMarker<V>>::Element: 'static,
+        <V as SliceMarker<V>>::Element: 'static + Sync,
     {
         let (typename, col) = (&mut self.typename, &mut self.column);
         let col_ref_downcasted = match  col {
@@ -264,7 +317,7 @@ impl<'a> ColumnWrapper<'a> {
         &mut Option<Bitmap>,
     )
     where
-        <V as SliceMarker<V>>::Element: 'static,
+        <V as SliceMarker<V>>::Element: 'static + Sync,
     {
         let (col, ind, bmap, typename, _typeid) = (
             &mut self.column,
