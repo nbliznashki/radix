@@ -952,7 +952,7 @@ mod tests {
 
         let s1 = sig!["+"; Vec<u32>, Vec<u32>];
         let s2 = sig!["+"; Vec<u64>, Vec<u32>];
-        let s3 = sig!["+="; Vec<u64>,Vec<u64>];
+        let s3 = sig!["+="; Vec<u64>,[u64]];
 
         let col1: Vec<ColumnWrapper> = vec![
             //let col1: Vec<Arc<OwnedColumn<Vec<u64>>>> = vec![
@@ -983,7 +983,7 @@ mod tests {
             ColumnWrapper::new(vec![4_u64, 5, 6], None, None),
             ColumnWrapper::new(vec![4_u64, 5, 6], None, None),
         ];
-
+        let col4: Vec<u64> = vec![4, 5, 6, 4, 5, 6, 4, 5, 6];
         let expr: Expression = Expression::new(
             s1,
             Binding::OwnedColumn,
@@ -1008,15 +1008,16 @@ mod tests {
             .iter()
             .zip(col2.iter())
             .zip(col3.iter())
-            .zip(col4.iter())
+            .zip(col4.chunks(3))
             .map(|(((c1, c2), c3), c4)| {
                 let (_, mut owned_values) = expr.compile(&dict, &init_dict);
 
                 let mut owned_values_refmut = owned_values.iter_mut().collect();
+                let c4_slice = ColumnWrapper::new_slice(c4, None, None);
 
                 expr.eval(
                     &mut owned_values_refmut,
-                    &vec![c1, c2, c3, c4],
+                    &vec![c1, c2, c3, &c4_slice],
                     &vec![],
                     &dict,
                 );
@@ -1181,5 +1182,30 @@ mod tests {
         drop(l);
         t.iter().for_each(|i| println!("{}", i));
         //let v = unsafe { slice_to_vec(l) };
+    }
+    #[test]
+    fn test_partition() {
+        let col4: Vec<u64> = vec![1, 5, 6, 4, 5, 6, 4, 5, 6, 8];
+        let mut col4 = ColumnWrapper::new(col4, None, None);
+        let signature = sig!["part"; Vec<u64>];
+        let mut part_dict: PartitionDictionary = HashMap::new();
+        load_part_dict(&mut part_dict);
+        {
+            let inp: InputTypes = InputTypes::Ref(&col4);
+            let op = part_dict.get(&signature).unwrap();
+            let col4_part = (*op).part(&inp, 3);
+            col4_part
+                .iter()
+                .for_each(|c| println!("{:?}", c.downcast_slice_ref::<[u64]>()));
+        }
+
+        let tmp = col4.downcast_mut::<Vec<u64>>();
+        tmp[0] = 4;
+        let inp: InputTypes = InputTypes::Ref(&col4);
+        let op = part_dict.get(&signature).unwrap();
+        let col4_part = (*op).part(&inp, 3);
+        col4_part
+            .iter()
+            .for_each(|c| println!("{:?}", c.downcast_slice_ref::<[u64]>()));
     }
 }
