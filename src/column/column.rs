@@ -295,9 +295,11 @@ impl<'a> ColumnWrapper<'a> {
         <V as SliceMarker<V>>::Element: 'static + Sync,
     {
         let (typename, col) = (&mut self.typename, &mut self.column);
-        let col_ref_downcasted = match  col {
+        let col_ref_downcasted = match col {
             ColumnData::SliceRefMut(col) => col.downcast_mut::<V>(),
-            _=>panic!("downcast_slice_ref can only be used with SliceRef and SliceRefMut variants of ColumnWrapper")
+            _ => panic!(
+                "downcast_slice_mut can only be used withSliceRefMut variant of ColumnWrapper"
+            ),
         };
 
         col_ref_downcasted.unwrap_or_else(|| {

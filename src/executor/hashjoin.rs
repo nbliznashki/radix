@@ -1,4 +1,4 @@
-use crate::{hashcolumn::*, InitDictionary, OpDictionary};
+use crate::{hashcolumn::*, Dictionary, InitDictionary, OpDictionary};
 use crate::{ColumnWrapper, Expression};
 
 use std::cmp::max;
@@ -100,8 +100,7 @@ pub fn applyoneif<'a>(
     left_ind: &mut Vec<usize>,
     right_ind: &mut Vec<usize>,
     expr: &Expression,
-    dict: &OpDictionary,
-    init_dict: &InitDictionary,
+    dict: &Dictionary,
 ) {
     let left_ind_backup: Vec<_> = left_cols.iter_mut().map(|c| c.re_index(left_ind)).collect();
     let right_ind_backup: Vec<_> = right_cols
@@ -112,7 +111,7 @@ pub fn applyoneif<'a>(
     let mut ref_columns: Vec<&ColumnWrapper> = left_cols.iter().map(|c| &(**c)).collect();
     ref_columns.extend(right_cols.iter().map(|c| &(**c)));
 
-    let mut owned_columns = expr.compile(&dict, &init_dict).1;
+    let mut owned_columns = expr.compile(&dict).1;
     expr.eval(
         &mut owned_columns.iter_mut().collect(),
         &ref_columns,

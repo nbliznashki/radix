@@ -36,7 +36,7 @@ fn column_ref<'a>(name: &str, input: &'a Vec<&ColumnWrapper>) -> (&'a ColumnWrap
 pub fn parseexpr_rec<'a>(
     expr: &Expr,
     input: &'a Vec<&ColumnWrapper>,
-    dict: &OpDictionary,
+    dict: &Dictionary,
 ) -> Expression {
     match expr {
         Expr::BinaryOp { left, op, right } => match (&(**left), &(**right)) {
@@ -126,7 +126,7 @@ pub fn parseexpr_rec<'a>(
     }
 }
 
-pub fn parseexpr(expr: &Expr, input: &Vec<&ColumnWrapper>, dict: &OpDictionary) -> Expression {
+pub fn parseexpr(expr: &Expr, input: &Vec<&ColumnWrapper>, dict: &Dictionary) -> Expression {
     let expr_output = parseexpr_rec(expr, input, dict);
     expr_output
 }

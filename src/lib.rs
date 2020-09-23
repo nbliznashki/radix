@@ -31,7 +31,7 @@ mod tests {
     //use crate::expressions::operations::init_dict;
     use crate::hashcolumn::*;
     use crate::*;
-    use std::{collections::HashMap, ops::Deref};
+    use std::ops::Deref;
 
     use std::collections::hash_map::RandomState;
     use std::rc::*;
@@ -945,10 +945,7 @@ mod tests {
     fn expression_compile() {
         use crate::column::*;
 
-        let mut dict: OpDictionary = HashMap::new();
-        load_op_dict(&mut dict);
-        let mut init_dict: InitDictionary = HashMap::new();
-        load_init_dict(&mut init_dict);
+        let dict: Dictionary = Dictionary::new();
 
         let s1 = sig!["+"; Vec<u32>, Vec<u32>];
         let s2 = sig!["+"; Vec<u64>, Vec<u32>];
@@ -978,7 +975,7 @@ mod tests {
             ColumnWrapper::new(vec![0_u64, 0, 0], None, None),
         ];
 
-        let col4: Vec<ColumnWrapper> = vec![
+        let _col4: Vec<ColumnWrapper> = vec![
             ColumnWrapper::new(vec![4_u64, 5, 6], None, None),
             ColumnWrapper::new(vec![4_u64, 5, 6], None, None),
             ColumnWrapper::new(vec![4_u64, 5, 6], None, None),
@@ -1000,7 +997,7 @@ mod tests {
             vec![Binding::RefColumn(3)],
         );
 
-        let (ops, owned_values) = expr.compile(&dict, &init_dict);
+        let (ops, owned_values) = expr.compile(&dict);
         assert_eq!(owned_values.len(), 2);
         assert_eq!(ops.len(), 3);
 
@@ -1010,7 +1007,7 @@ mod tests {
             .zip(col3.iter())
             .zip(col4.chunks(3))
             .map(|(((c1, c2), c3), c4)| {
-                let (_, mut owned_values) = expr.compile(&dict, &init_dict);
+                let (_, mut owned_values) = expr.compile(&dict);
 
                 let mut owned_values_refmut = owned_values.iter_mut().collect();
                 let c4_slice = ColumnWrapper::new_slice(c4, None, None);
@@ -1037,10 +1034,7 @@ mod tests {
 
     #[test]
     fn parse_expression() {
-        let mut dict: OpDictionary = HashMap::new();
-        load_op_dict(&mut dict);
-        let mut init_dict: InitDictionary = HashMap::new();
-        load_init_dict(&mut init_dict);
+        let dict: Dictionary = Dictionary::new();
 
         let data_col1 = vec![4_u64, 5];
         let mut data_col2 = vec![4_u32, 5, 6];
@@ -1062,7 +1056,7 @@ mod tests {
         let p = get_first_projection(sqlstmt);
         let expr = parseexpr(&p, &ref_columns, &dict);
 
-        let mut owned_columns = expr.compile(&dict, &init_dict).1;
+        let mut owned_columns = expr.compile(&dict).1;
         expr.eval(
             &mut owned_columns.iter_mut().collect(),
             &ref_columns,
@@ -1082,10 +1076,7 @@ mod tests {
     }
     #[test]
     fn test_eqinit() {
-        let mut dict: OpDictionary = HashMap::new();
-        load_op_dict(&mut dict);
-        let mut init_dict: InitDictionary = HashMap::new();
-        load_init_dict(&mut init_dict);
+        let dict: Dictionary = Dictionary::new();
 
         let c1 = ColumnWrapper::new(
             vec![1_u64, 2, 3],
@@ -1103,7 +1094,7 @@ mod tests {
         let p = get_first_projection(sqlstmt);
         let expr = parseexpr(&p, &ref_columns, &dict);
 
-        let mut owned_columns = expr.compile(&dict, &init_dict).1;
+        let mut owned_columns = expr.compile(&dict).1;
         expr.eval(
             &mut owned_columns.iter_mut().collect(),
             &ref_columns,
@@ -1120,19 +1111,7 @@ mod tests {
 
     #[test]
     fn test_applyoneif() {
-        struct CrazyVec<'a, T> {
-            data: Vec<T>,
-            phantom: std::marker::PhantomData<&'a T>,
-        }
-
-        /*     Ref(&'a (dyn Any + Send + Sync)),
-               RefMut(&'a mut (dyn Any + Send + Sync)),
-        */
-
-        let mut dict: OpDictionary = HashMap::new();
-        load_op_dict(&mut dict);
-        let mut init_dict: InitDictionary = HashMap::new();
-        load_init_dict(&mut init_dict);
+        let dict: Dictionary = Dictionary::new();
 
         let mut c1 = ColumnWrapper::new(
             vec![1_u64, 2, 3, 10, 13],
@@ -1165,7 +1144,6 @@ mod tests {
             &mut index_right,
             &expr,
             &dict,
-            &init_dict,
         );
 
         assert_eq!(index_left, vec![0, 0]);
@@ -1173,7 +1151,7 @@ mod tests {
         assert_eq!(c1.index(), &c1_index_orig);
         assert_eq!(c2.index(), &c2_index_orig);
         let mut t: Vec<u64> = vec![1, 2, 3, 4, 5];
-        let (l, r) = t.split_at_mut(3);
+        let (l, _r) = t.split_at_mut(3);
         let mut srm = SliceRefMut::new(l);
         let a = srm.downcast_mut::<[u64]>().unwrap();
         a[1] = 7;
@@ -1184,28 +1162,97 @@ mod tests {
         //let v = unsafe { slice_to_vec(l) };
     }
     #[test]
-    fn test_partition() {
+    fn test_partition_fixedlen() {
         let col4: Vec<u64> = vec![1, 5, 6, 4, 5, 6, 4, 5, 6, 8];
         let mut col4 = ColumnWrapper::new(col4, None, None);
         let signature = sig!["part"; Vec<u64>];
-        let mut part_dict: PartitionDictionary = HashMap::new();
-        load_part_dict(&mut part_dict);
-        {
-            let inp: InputTypes = InputTypes::Ref(&col4);
-            let op = part_dict.get(&signature).unwrap();
-            let col4_part = (*op).part(&inp, 3);
-            col4_part
-                .iter()
-                .for_each(|c| println!("{:?}", c.downcast_slice_ref::<[u64]>()));
-        }
+        let dict: Dictionary = Dictionary::new();
+        let op = dict.part.get(&signature).unwrap();
+
+        let col4_part = op.part(&col4, 3);
+        let mut itr = col4_part.iter().map(|c| c.downcast_slice_ref::<[u64]>());
+
+        assert_eq!(itr.next(), Some(&[1_u64, 5, 6] as &[_]));
+        assert_eq!(itr.next(), Some(&[4_u64, 5, 6] as &[_]));
+        assert_eq!(itr.next(), Some(&[4_u64, 5, 6] as &[_]));
+        assert_eq!(itr.next(), Some(&[8_u64] as &[_]));
+        assert_eq!(itr.next(), None);
 
         let tmp = col4.downcast_mut::<Vec<u64>>();
         tmp[0] = 4;
-        let inp: InputTypes = InputTypes::Ref(&col4);
-        let op = part_dict.get(&signature).unwrap();
-        let col4_part = (*op).part(&inp, 3);
+        let op = dict.part.get(&signature).unwrap();
+        let mut col4_part = op.part_mut(&mut col4, 3);
         col4_part
-            .iter()
-            .for_each(|c| println!("{:?}", c.downcast_slice_ref::<[u64]>()));
+            .iter_mut()
+            .for_each(|c| c.downcast_slice_mut::<[u64]>()[0] -= 1);
+        let mut itr = col4_part.iter().map(|c| c.downcast_slice_ref::<[u64]>());
+
+        assert_eq!(itr.next(), Some(&[3_u64, 5, 6] as &[_]));
+        assert_eq!(itr.next(), Some(&[3_u64, 5, 6] as &[_]));
+        assert_eq!(itr.next(), Some(&[3_u64, 5, 6] as &[_]));
+        assert_eq!(itr.next(), Some(&[7_u64] as &[_]));
+        assert_eq!(itr.next(), None);
+    }
+    #[test]
+    fn test_partition_variablelen() {
+        let col4: Vec<u64> = vec![1, 5, 6, 4, 5, 6, 4, 5, 6, 8];
+        let chunks_size: Vec<usize> = vec![3, 3, 3, 1];
+        let mut col4 = ColumnWrapper::new(col4, None, None);
+        let signature = sig!["part"; Vec<u64>];
+        let dict: Dictionary = Dictionary::new();
+        let op = dict.part.get(&signature).unwrap();
+
+        let col4_part = op.part_with_sizes(&col4, &chunks_size);
+        let mut itr = col4_part.iter().map(|c| c.downcast_slice_ref::<[u64]>());
+
+        assert_eq!(itr.next(), Some(&[1_u64, 5, 6] as &[_]));
+        assert_eq!(itr.next(), Some(&[4_u64, 5, 6] as &[_]));
+        assert_eq!(itr.next(), Some(&[4_u64, 5, 6] as &[_]));
+        assert_eq!(itr.next(), Some(&[8_u64] as &[_]));
+        assert_eq!(itr.next(), None);
+
+        let tmp = col4.downcast_mut::<Vec<u64>>();
+        tmp[0] = 4;
+        let op = dict.part.get(&signature).unwrap();
+        let mut col4_part = op.part_with_sizes_mut(&mut col4, &chunks_size);
+        col4_part
+            .iter_mut()
+            .for_each(|c| c.downcast_slice_mut::<[u64]>()[0] -= 1);
+        let mut itr = col4_part.iter().map(|c| c.downcast_slice_ref::<[u64]>());
+
+        assert_eq!(itr.next(), Some(&[3_u64, 5, 6] as &[_]));
+        assert_eq!(itr.next(), Some(&[3_u64, 5, 6] as &[_]));
+        assert_eq!(itr.next(), Some(&[3_u64, 5, 6] as &[_]));
+        assert_eq!(itr.next(), Some(&[7_u64] as &[_]));
+        assert_eq!(itr.next(), None);
+    }
+    #[test]
+    fn test_len() {
+        let col4: Vec<u64> = vec![1, 5, 6, 4, 5, 6, 4, 5, 6, 8];
+        let dict: Dictionary = Dictionary::new();
+
+        let len_orig = col4.len();
+        let mut col4 = ColumnWrapper::new(col4, None, None);
+
+        let signature = sig!["len"; Vec<u64>];
+        let len_data = dict.len_data.get(&signature).unwrap();
+        let len_column = len_data(&col4);
+
+        let signature = sig!["part"; Vec<u64>];
+        let op = dict.part.get(&signature).unwrap();
+
+        let col4_part = op.part_mut(&mut col4, 3);
+        let signature = sig!["len"; [u64]];
+        let len_data = dict.len_data.get(&signature).unwrap();
+        let len_column_partitioned_mut: usize = col4_part.iter().map(|c| len_data(c)).sum();
+
+        let col4_part = op.part(&mut col4, 6);
+        let signature = sig!["len"; [u64]];
+        let len_data = dict.len_data.get(&signature).unwrap();
+        let len_column_partitioned: usize = col4_part.iter().map(|c| len_data(c)).sum();
+
+        assert_eq!(len_orig, len_column);
+        assert_eq!(len_orig, len_column_partitioned_mut);
+        assert_eq!(len_orig, len_column_partitioned);
     }
 }

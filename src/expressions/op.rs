@@ -1,5 +1,4 @@
-use crate::ColumnWrapper;
-use crate::InitDictionary;
+use crate::{ColumnWrapper, Dictionary};
 use std::any::TypeId;
 use std::collections::HashMap;
 
@@ -70,8 +69,8 @@ impl Signature {
         &self.op_name
     }
 
-    pub fn as_output_sig(&self, dict: &OpDictionary) -> Self {
-        let op = dict.get(&self).unwrap();
+    pub fn as_output_sig(&self, dict: &Dictionary) -> Self {
+        let op = dict.op.get(&self).unwrap();
         Self {
             op_name: "new".to_string(),
             input: vec![op.output_type],
@@ -117,7 +116,7 @@ impl Expression {
         owned_columns: &mut Vec<&mut ColumnWrapper>,
         ref_columns: &Vec<&ColumnWrapper>,
         const_values: &Vec<&ColumnWrapper>,
-        dict: &OpDictionary,
+        dict: &Dictionary,
     ) {
         let mut output: &mut ColumnWrapper = match &self.output {
             Binding::OwnedColumn => owned_columns.pop().unwrap(),
@@ -144,7 +143,7 @@ impl Expression {
             })
             .collect();
 
-        let op = dict.get(&self.op).unwrap();
+        let op = dict.op.get(&self.op).unwrap();
         (op.f)(&mut output, input);
         owned_columns.push(output);
     }
@@ -154,7 +153,7 @@ impl Expression {
         owned_columns: &mut Vec<&mut ColumnWrapper>,
         ref_columns: &Vec<&ColumnWrapper>,
         const_values: &Vec<&ColumnWrapper>,
-        dict: &OpDictionary,
+        dict: &Dictionary,
     ) {
         self.eval_recursive(owned_columns, ref_columns, const_values, dict);
         assert_eq!(owned_columns.len(), 1);
@@ -162,53 +161,48 @@ impl Expression {
 
     fn compile_recursive(
         &self,
-        dict: &OpDictionary,
-        init_dict: &InitDictionary,
+        dict: &Dictionary,
         ops: &mut Vec<Operation>,
         owned_columns: &mut Vec<ColumnWrapper>,
     ) {
         self.input.iter().rev().for_each(|inp| match inp {
             Binding::OwnedColumn | Binding::RefColumn(_) | Binding::ConstValue(_) => {}
             Binding::Expr(expr) => {
-                (*expr).compile_recursive(dict, init_dict, ops, owned_columns);
+                (*expr).compile_recursive(dict, ops, owned_columns);
             }
         });
 
         match &self.output {
             Binding::OwnedColumn => {
                 let output_sig = &self.op.as_output_sig(dict);
-                let f = init_dict.get(output_sig).unwrap();
+                let f = dict.init.get(output_sig).unwrap();
                 owned_columns.push(f());
                 //println!("{}", output_sig.op_name())
             }
             Binding::Expr(expr) => {
-                (*expr).compile_recursive(dict, init_dict, ops, owned_columns);
+                (*expr).compile_recursive(dict, ops, owned_columns);
             }
             Binding::RefColumn(_) | Binding::ConstValue(_) => {
                 panic!("Incorrect expression output type")
             }
         }
-        let op = dict.get(&self.op).unwrap();
+        let op = dict.op.get(&self.op).unwrap();
 
         ops.push(op.clone());
     }
 
-    pub fn compile(
-        &self,
-        dict: &OpDictionary,
-        init_dict: &InitDictionary,
-    ) -> (Vec<Operation>, Vec<ColumnWrapper>) {
+    pub fn compile(&self, dict: &Dictionary) -> (Vec<Operation>, Vec<ColumnWrapper>) {
         let mut ops: Vec<Operation> = Vec::new();
         let mut owned_columns: Vec<ColumnWrapper> = Vec::new();
-        self.compile_recursive(dict, init_dict, &mut ops, &mut owned_columns);
+        self.compile_recursive(dict, &mut ops, &mut owned_columns);
         (ops, owned_columns)
     }
 
-    pub fn output_type(&self, dict: &OpDictionary) -> TypeId {
+    pub fn output_type(&self, dict: &Dictionary) -> TypeId {
         self.op.as_output_sig(dict).input.pop().unwrap()
     }
 
-    pub fn output_typename(&self, dict: &OpDictionary) -> String {
+    pub fn output_typename(&self, dict: &Dictionary) -> String {
         self.op.as_output_sig(dict).input_typenames.pop().unwrap()
     }
 }
