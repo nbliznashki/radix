@@ -31,16 +31,8 @@ fn hashadd_vecu64_columnu8(output: &mut ColumnWrapper, input: Vec<InputTypes>) {
     let (data_output, index_output, bitmap_output) = output.all_mut::<Vec<T1>>();
 
     let (datau8_input, index_input, bitmap_input) = match &input[0] {
-        InputTypes::Ref(a) => (
-            a.downcast_ref::<T2>(),
-            a.index().as_ref(),
-            a.bitmap().as_ref(),
-        ),
-        InputTypes::Owned(a) => (
-            a.downcast_ref::<T2>(),
-            a.index().as_ref(),
-            a.bitmap().as_ref(),
-        ),
+        InputTypes::Ref(a) => (a.downcast_ref::<T2>(), a.index(), a.bitmap()),
+        InputTypes::Owned(a) => (a.downcast_ref::<T2>(), a.index(), a.bitmap()),
     };
 
     //The output column should have no index
@@ -79,7 +71,7 @@ fn hashadd_vecu64_columnu8(output: &mut ColumnWrapper, input: Vec<InputTypes>) {
                 ind.iter()
                     .map(|i| &data[slice_start_pos[*i]..slice_start_pos[*i] + slice_len[*i]]),
             )
-            .zip(b_right.bits.iter())
+            .zip(b_right.iter())
             .for_each(|((l, sliceu8), b_r)| {
                 l.add_assign(if *b_r != 0 {
                     {
@@ -109,7 +101,7 @@ fn hashadd_vecu64_columnu8(output: &mut ColumnWrapper, input: Vec<InputTypes>) {
             .iter_mut()
             .zip(slice_start_pos.iter())
             .zip(slice_len.iter())
-            .zip(b_right.bits.iter())
+            .zip(b_right.iter())
             .for_each(|(((l, slice_start), len), b_r)| {
                 l.add_assign(if *b_r != 0 {
                     {
@@ -126,9 +118,9 @@ fn hashadd_vecu64_columnu8(output: &mut ColumnWrapper, input: Vec<InputTypes>) {
     if bitmap_output.is_none() {
         *bitmap_output = match (index_input, bitmap_input) {
             (_, None) => None,
-            (None, Some(b_right)) => Some((*b_right).clone()),
+            (None, Some(b_right)) => Some(Bitmap::from(b_right.to_vec())),
             (Some(ind), Some(b_right)) => Some(Bitmap {
-                bits: ind.iter().map(|i| b_right.bits[*i]).collect(),
+                bits: ind.iter().map(|i| b_right[*i]).collect(),
             }),
         };
     } else {
@@ -138,13 +130,13 @@ fn hashadd_vecu64_columnu8(output: &mut ColumnWrapper, input: Vec<InputTypes>) {
             (None, Some(b_right)) => b_left
                 .bits
                 .iter_mut()
-                .zip(b_right.bits.iter())
+                .zip(b_right.iter())
                 .for_each(|(b_l, b_r)| *b_l &= b_r),
             (Some(ind), Some(b_right)) => b_left
                 .bits
                 .iter_mut()
                 .zip(ind.iter())
-                .for_each(|(b_l, i)| *b_l &= b_right.bits[*i]),
+                .for_each(|(b_l, i)| *b_l &= b_right[*i]),
         };
         *bitmap_output = Some(b_left);
     }

@@ -25,7 +25,7 @@ pub fn build_ind(
         match left.bitmap() {
             Some(bmap) => {
                 left.iter()
-                    .zip(bmap.bits.iter())
+                    .zip(bmap.iter())
                     .enumerate()
                     .filter(|(_, (_value, b))| **b != 0)
                     .map(|(i, (value, _b))| (i + 1, value >> (num_bits_to_shift)))
@@ -56,7 +56,7 @@ pub fn build_ind(
                 Some(bmap) => {
                     right
                         .iter()
-                        .zip(bmap.bits.iter())
+                        .zip(bmap.iter())
                         .enumerate()
                         .filter(|(_, (_value, b))| **b != 0)
                         .map(|(i, (value, _b))| (i + 1, value, value >> (num_bits_to_shift)))

@@ -83,14 +83,21 @@ macro_rules! binary_operation_impl {
                 type V=Vec<$tr>;
                 let (data_input, index_input, bitmap_input) = (inp.downcast_ref::<V>(), inp.index(), inp.bitmap());
 
-                //Not supported at the moment
-                //TO-DO: fix that
-                assert_eq!(bitmap_input, &None);
-                assert_eq!(index_input, &None);
-
-                let output: Vec<ColumnWrapper<'b>>=data_input.chunks(chunk_size).map(|c| ColumnWrapper::new_slice(c, None, None)).collect();
-
-                output
+                match index_input {
+                    Some(ind) => ind
+                        .chunks(chunk_size)
+                        .map(|ind| inp.copy_inner_as_ref().with_index_slice(ind))
+                        .collect(),
+                    None => {
+                        let mut output: Vec<ColumnWrapper<'b>>=data_input.chunks(chunk_size).map(|c| ColumnWrapper::new_slice(c)).collect();
+                        if let Some(b) = bitmap_input {
+                            output=output.into_iter()
+                                .zip(b.chunks(chunk_size))
+                                .map(|(c, b)| c.with_bitmap_slice(b)).collect();
+                        }
+                        output
+                    }
+                }
             }
 
             fn part_mut<'a: 'b, 'b>(&self, inp: &'b mut ColumnWrapper<'a>, chunk_size: usize) -> Vec<ColumnWrapper<'b>>
@@ -98,15 +105,17 @@ macro_rules! binary_operation_impl {
                 type V=Vec<$tr>;
                 let (data_input, index_input, bitmap_input) = inp.all_mut::<V>();
 
+                if let Some(_) = index_input {
+                    panic!("Can't partition a column with an index into mutable parts")
+                };
 
 
-                //Not supported at the moment
-                //TO-DO: fix that
-                assert_eq!(bitmap_input, &None);
-                assert_eq!(index_input, &None);
-
-                let output: Vec<ColumnWrapper<'b>>=data_input.chunks_mut(chunk_size).map(|c| ColumnWrapper::new_slice_mut(c, None, None)).collect();
-
+                let mut output: Vec<ColumnWrapper<'b>>=data_input.chunks_mut(chunk_size).map(|c| ColumnWrapper::new_slice_mut(c)).collect();
+                if let Some(b) = bitmap_input {
+                    output=output.into_iter()
+                        .zip(b.bits.chunks_mut(chunk_size))
+                        .map(|(c, b)| c.with_bitmap_slice_mut(b)).collect();
+                }
                 output
             }
 
@@ -119,22 +128,43 @@ macro_rules! binary_operation_impl {
                 type V=Vec<$tr>;
                 let (data_input, index_input, bitmap_input) = (inp.downcast_ref::<V>(), inp.index(), inp.bitmap());
 
-                //Not supported at the moment
-                //TO-DO: fix that
-                assert_eq!(bitmap_input, &None);
-                assert_eq!(index_input, &None);
-
                 let mut output: Vec<ColumnWrapper<'b>>=Vec::with_capacity(chunks_size.len());
-                let mut cur_slice=data_input.as_slice();
 
-                chunks_size.iter().for_each(|l|{
-                    let (l,r)=cur_slice.split_at(*l);
-                    cur_slice=r;
-                    output.push(ColumnWrapper::new_slice(l, None, None));
-                });
+                let total_len=chunks_size.iter().sum::<usize>();
 
+                match index_input {
+                    Some(ind) => {
+                        assert_eq!(ind.len(), total_len);
+                        let mut cur_slice=ind;
+                        chunks_size.iter().for_each(|l|{
+                            let (l,r)=cur_slice.split_at(*l);
+                            cur_slice=r;
+                            output.push(inp.copy_inner_as_ref().with_index_slice(l));
+                        });
+                    }
+                    None => {
+                        assert_eq!(data_input.len(), total_len);
+                        let mut cur_slice_data=data_input.as_slice();
+                        if let Some(bitmap)=bitmap_input{
+                            assert_eq!(bitmap.len(), total_len);
+                            let mut cur_slice_bitmap=bitmap;
+                            chunks_size.iter().for_each(|l|{
+                                let (l_data,r)=cur_slice_data.split_at(*l);
+                                cur_slice_data=r;
+                                let (l_bitmap,r)=cur_slice_bitmap.split_at(*l);
+                                cur_slice_bitmap=r;
+                                output.push(ColumnWrapper::new_slice(l_data).with_bitmap_slice(l_bitmap));
+                            });
+                        } else{
+                            chunks_size.iter().for_each(|l|{
+                                let (l_data,r)=cur_slice_data.split_at(*l);
+                                cur_slice_data=r;
+                                output.push(ColumnWrapper::new_slice(l_data));
+                            });
+                        }
+                    }
+                }
                 output
-
             }
             fn part_with_sizes_mut<'a: 'b, 'b>(
                 &self,
@@ -145,19 +175,31 @@ macro_rules! binary_operation_impl {
                 type V=Vec<$tr>;
                 let (data_input, index_input, bitmap_input) = inp.all_mut::<V>();
 
-                //Not supported at the moment
-                //TO-DO: fix that
-                assert_eq!(bitmap_input, &None);
-                assert_eq!(index_input, &None);
+                let total_len=chunks_size.iter().sum::<usize>();
+
+                if let Some(_) = index_input {
+                    panic!("Can't partition a column with an index into mutable parts")
+                };
+
+                assert_eq!(data_input.len(), total_len);
 
                 let mut output: Vec<ColumnWrapper<'b>>=Vec::with_capacity(chunks_size.len());
-                let mut cur_slice=ChunksSizedMut{v: data_input.as_mut_slice()};
+                let mut cur_slice_data=ChunksSizedMut{v: data_input.as_mut_slice()};
 
-                chunks_size.iter().for_each(|i|{
-                    let r=cur_slice.next_exact(*i).unwrap();
-                    output.push(ColumnWrapper::new_slice_mut(r, None, None));
-                });
-                assert!(cur_slice.is_empty());
+                if let Some(bitmap)=bitmap_input{
+                    assert_eq!(bitmap.len(), total_len);
+                    let mut cur_slice_bitmap=ChunksSizedMut{v: bitmap.bits.as_mut_slice()};
+                    chunks_size.iter().for_each(|i|{
+                        let r_data=cur_slice_data.next_exact(*i).unwrap();
+                        let r_bitmap=cur_slice_bitmap.next_exact(*i).unwrap();
+                        output.push(ColumnWrapper::new_slice_mut(r_data).with_bitmap_slice_mut(r_bitmap));
+                    });
+                } else {
+                    chunks_size.iter().for_each(|i|{
+                        let r=cur_slice_data.next_exact(*i).unwrap();
+                        output.push(ColumnWrapper::new_slice_mut(r));
+                    });
+                }
                 output
             }
         }

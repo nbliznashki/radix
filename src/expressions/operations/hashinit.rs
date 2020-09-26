@@ -39,8 +39,8 @@ macro_rules! binary_operation_impl {
                 let (data_output, index_output, bitmap_output) = output.all_mut::<Vec<T1>>();
 
                 let (data_input, index_input, bitmap_input) = match &input[0] {
-                    InputTypes::Ref(a)=>(a.downcast_ref::<Vec<T1>>(), a.index().as_ref(), a.bitmap().as_ref()),
-                    InputTypes::Owned(a)=>(a.downcast_ref::<Vec<T1>>(), a.index().as_ref(), a.bitmap().as_ref())
+                    InputTypes::Ref(a)=>(a.downcast_ref::<Vec<T1>>(), a.index(), a.bitmap()),
+                    InputTypes::Owned(a)=>(a.downcast_ref::<Vec<T1>>(), a.index(), a.bitmap())
                 };
 
                 let len_input = if let Some(ind) = index_input {
@@ -66,7 +66,7 @@ macro_rules! binary_operation_impl {
                         })),
                     (Some(ind), Some(b_right)) => data_output.extend(
                         ind.iter().map(|i| &data_input[*i])
-                        .zip(b_right.bits.iter())
+                        .zip(b_right.iter())
                         .map(|(r, b_r)| {
                             if *b_r != 0 {
                                 {let mut h=rs.build_hasher(); r.hash(&mut h); h.finish()}
@@ -81,7 +81,7 @@ macro_rules! binary_operation_impl {
 
                     (None, Some(b_right)) => data_output.extend(
                         data_input.iter()
-                        .zip(b_right.bits.iter())
+                        .zip(b_right.iter())
                         .map(|(r, b_r)| {
                             if *b_r != 0 {
                                 {let mut h=rs.build_hasher(); r.hash(&mut h); h.finish()}
@@ -93,9 +93,9 @@ macro_rules! binary_operation_impl {
 
                 if let Some(bmap)=&bitmap_input{
                     if let Some(ind)=&index_input{
-                        *bitmap_output=Some(Bitmap{bits: ind.iter().map(|i| bmap.bits[*i]).collect()});
+                        *bitmap_output=Some(Bitmap{bits: ind.iter().map(|i| bmap[*i]).collect()});
                     } else {
-                        *bitmap_output=Some(Bitmap{bits: bmap.bits.iter().map(|i| *i).collect()});
+                        *bitmap_output=Some(Bitmap{bits: bmap.iter().map(|i| *i).collect()});
                     }
                 }
             }

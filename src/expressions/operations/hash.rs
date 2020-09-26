@@ -44,8 +44,8 @@ macro_rules! binary_operation_impl {
                 let (data_output, index_output, bitmap_output) = output.all_mut::<HashData>();
 
                 let (data_input, index_input, bitmap_input) = match &input[0] {
-                    InputTypes::Ref(a)=>(a.downcast_ref::<Vec<T2>>(), a.index().as_ref(), a.bitmap().as_ref()),
-                    InputTypes::Owned(a)=>(a.downcast_ref::<Vec<T2>>(), a.index().as_ref(), a.bitmap().as_ref())
+                    InputTypes::Ref(a)=>(a.downcast_ref::<Vec<T2>>(), a.index(), a.bitmap()),
+                    InputTypes::Owned(a)=>(a.downcast_ref::<Vec<T2>>(), a.index(), a.bitmap())
                 };
 
 
@@ -71,7 +71,7 @@ macro_rules! binary_operation_impl {
                     (Some(ind), Some(b_right)) => data_output
                         .iter_mut()
                         .zip(ind.iter().map(|i| &data_input[*i]))
-                        .zip(b_right.bits.iter())
+                        .zip(b_right.iter())
                         .for_each(|((l, r), b_r)| {
                             l.add_assign(if *b_r != 0 {
                                 {let mut h=rs.build_hasher(); r.hash(&mut h); h.finish()}
@@ -88,7 +88,7 @@ macro_rules! binary_operation_impl {
                     (None, Some(b_right)) => data_output
                         .iter_mut()
                         .zip(data_input.iter())
-                        .zip(b_right.bits.iter())
+                        .zip(b_right.iter())
                         .for_each(|((l, r), b_r)| {
                             l.add_assign(if *b_r != 0 {
                                 {let mut h=rs.build_hasher(); r.hash(&mut h); h.finish()}
@@ -100,9 +100,9 @@ macro_rules! binary_operation_impl {
                 if bitmap_output.is_none() {
                     *bitmap_output = match (index_input, bitmap_input) {
                         (_, None) => None,
-                        (None, Some(b_right)) => Some((*b_right).clone()),
+                        (None, Some(b_right)) => Some(Bitmap::from(b_right.to_vec())),
                         (Some(ind), Some(b_right)) => Some(Bitmap {
-                            bits: ind.iter().map(|i| b_right.bits[*i]).collect(),
+                            bits: ind.iter().map(|i| b_right[*i]).collect(),
                         }),
                     };
                 } else {
@@ -112,13 +112,13 @@ macro_rules! binary_operation_impl {
                         (None, Some(b_right)) => b_left
                             .bits
                             .iter_mut()
-                            .zip(b_right.bits.iter())
+                            .zip(b_right.iter())
                             .for_each(|(b_l, b_r)| *b_l &= b_r),
                         (Some(ind), Some(b_right)) => b_left
                             .bits
                             .iter_mut()
                             .zip(ind.iter())
-                            .for_each(|(b_l, i)| *b_l &= b_right.bits[*i]),
+                            .for_each(|(b_l, i)| *b_l &= b_right[*i]),
                     };
                     *bitmap_output = Some(b_left);
                 }

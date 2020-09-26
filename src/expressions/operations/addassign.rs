@@ -166,8 +166,8 @@ fn addassign_c<T1, T2>(
     index_output: &mut ColumnIndex,
     bitmap_output: &mut Option<Bitmap>,
     data_input: &[T2],
-    index_input: &ColumnIndex,
-    bitmap_input: &Option<Bitmap>,
+    index_input: ColumnIndexRef,
+    bitmap_input: Option<&[u8]>,
 ) where
     T1: AddAssign,
     T1: From<T2>,
@@ -213,7 +213,7 @@ fn addassign_c<T1, T2>(
         (Some(ind), None, Some(b_right)) => data_output
             .iter_mut()
             .zip(ind.iter().map(|i| &data_input[*i]))
-            .zip(b_right.bits.iter())
+            .zip(b_right.iter())
             .for_each(|((l, r), b_r)| {
                 l.add_assign(if *b_r != 0 {
                     T1::from(*r)
@@ -225,7 +225,7 @@ fn addassign_c<T1, T2>(
             .iter_mut()
             .zip(ind.iter().map(|i| &data_input[*i]))
             .zip(b_left.bits.iter())
-            .zip(b_right.bits.iter())
+            .zip(b_right.iter())
             .for_each(|(((l, r), b_l), b_r)| {
                 l.add_assign(if (*b_l != 0) & (*b_r != 0) {
                     T1::from(*r)
@@ -252,7 +252,7 @@ fn addassign_c<T1, T2>(
         (None, None, Some(b_right)) => data_output
             .iter_mut()
             .zip(data_input.iter())
-            .zip(b_right.bits.iter())
+            .zip(b_right.iter())
             .for_each(|((l, r), b_r)| {
                 l.add_assign(if *b_r != 0 {
                     T1::from(*r)
@@ -264,7 +264,7 @@ fn addassign_c<T1, T2>(
             .iter_mut()
             .zip(data_input.iter())
             .zip(b_left.bits.iter())
-            .zip(b_right.bits.iter())
+            .zip(b_right.iter())
             .for_each(|(((l, r), b_l), b_r)| {
                 l.add_assign(if (*b_l != 0) & (*b_r != 0) {
                     T1::from(*r)
@@ -276,9 +276,9 @@ fn addassign_c<T1, T2>(
     if bitmap_output.is_none() {
         *bitmap_output = match (index_input, bitmap_input) {
             (_, None) => None,
-            (None, Some(b_right)) => Some((*b_right).clone()),
+            (None, Some(b_right)) => Some(Bitmap::from(b_right.to_vec())),
             (Some(ind), Some(b_right)) => Some(Bitmap {
-                bits: ind.iter().map(|i| b_right.bits[*i]).collect(),
+                bits: ind.iter().map(|i| b_right[*i]).collect(),
             }),
         };
     } else {
@@ -288,13 +288,13 @@ fn addassign_c<T1, T2>(
             (None, Some(b_right)) => b_left
                 .bits
                 .iter_mut()
-                .zip(b_right.bits.iter())
+                .zip(b_right.iter())
                 .for_each(|(b_l, b_r)| *b_l &= b_r),
             (Some(ind), Some(b_right)) => b_left
                 .bits
                 .iter_mut()
                 .zip(ind.iter())
-                .for_each(|(b_l, i)| *b_l &= b_right.bits[*i]),
+                .for_each(|(b_l, i)| *b_l &= b_right[*i]),
         };
         *bitmap_output = Some(b_left);
     }

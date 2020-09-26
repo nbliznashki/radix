@@ -30,6 +30,8 @@ pub enum FlattenedColumn<T> {
 
 pub type ColumnIndex = Option<Vec<usize>>;
 
+pub type ColumnIndexRef<'a> = Option<&'a [usize]>;
+
 pub type MaybeColumnIndex = Vec<MaybeUninit<usize>>;
 pub type ColumnIndexUnwrapped = Vec<usize>;
 

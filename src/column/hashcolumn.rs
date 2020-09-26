@@ -29,7 +29,7 @@ impl<'a> TryFrom<ColumnWrapper<'a>> for HashColumn<'a> {
         if c.typeid() == TypeId::of::<HashData>() {
             let (v, index, bitmap) = c.all_unwrap::<HashData>();
             Ok(HashColumn {
-                data: ColumnWrapper::new(v, index, bitmap),
+                data: ColumnWrapper::new(v).with_index(index).with_bitmap(bitmap),
             })
         } else {
             return Err("A Hash column should have a different data type");
@@ -51,18 +51,30 @@ impl<'a> DerefMut for HashColumn<'a> {
 }
 
 impl<'a> HashColumn<'a> {
-    pub fn new(data: Vec<u64>, bitmap: Option<Bitmap>) -> Self {
+    pub fn new(data: Vec<u64>) -> Self {
         Self {
-            data: ColumnWrapper::new(data, None, bitmap),
+            data: ColumnWrapper::new(data),
         }
     }
-    pub fn new_ref(data: &'a Vec<u64>, bitmap: Option<Bitmap>) -> Self {
+    pub fn new_ref(data: &'a Vec<u64>) -> Self {
         Self {
-            data: ColumnWrapper::new_ref(data, None, bitmap),
+            data: ColumnWrapper::new_ref(data),
         }
     }
 
-    pub fn bitmap(&self) -> &Option<Bitmap> {
+    pub fn with_bitmap(self, b: Option<Bitmap>) -> Self {
+        Self {
+            data: self.data.with_bitmap(b),
+        }
+    }
+
+    pub fn with_bitmap_ref(self, b: &'a Option<Bitmap>) -> Self {
+        Self {
+            data: self.data.with_bitmap_ref(b),
+        }
+    }
+
+    pub fn bitmap(&self) -> Option<&[u8]> {
         self.data.bitmap()
     }
     pub fn bitmap_mut(&mut self) -> &mut Option<Bitmap> {
@@ -75,7 +87,7 @@ impl<'a> HashColumn<'a> {
         let op = dict
             .get(&signature)
             .unwrap_or_else(|| panic!("Operation not found in dictionary: {:?}", signature));
-        let mut output = ColumnWrapper::<'static>::new(v, None, None);
+        let mut output = ColumnWrapper::<'static>::new(v);
         (op.f)(&mut output, vec![InputTypes::Ref(c)]);
         HashColumn::<'static>::try_from(output)
             .unwrap_or_else(|_| panic!("Failed to convert a ColumnWrapper to HashColumn"))
@@ -87,7 +99,7 @@ impl<'a> HashColumn<'a> {
         let op = dict
             .get(&signature)
             .unwrap_or_else(|| panic!("Operation not found in dictionary: {:?}", signature));
-        let mut output = ColumnWrapper::<'static>::new(v, None, None);
+        let mut output = ColumnWrapper::<'static>::new(v);
         (op.f)(&mut self.data, vec![InputTypes::Ref(c)]);
     }
 }

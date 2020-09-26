@@ -126,7 +126,7 @@ mod tests {
 
         assert!(r1.bitmap().is_none());
         assert!(r2.bitmap().is_some());
-        assert_eq!(r2.bitmap().as_ref().unwrap().bits, vec![1, 1, 0, 1]);
+        assert_eq!(r2.bitmap().unwrap(), vec![1, 1, 0, 1]);
     }
 
     //Validate that the function behaves the same way when given an index and when not given an index
@@ -192,12 +192,9 @@ mod tests {
 
     #[test]
     fn bucket_init() {
-        let hash = HashColumn::new(
-            vec![1, 2, 4, 6, 8, 10],
-            Some(Bitmap {
-                bits: vec![0, 1, 1, 1, 1, 1],
-            }),
-        );
+        let hash = HashColumn::new(vec![1, 2, 4, 6, 8, 10]).with_bitmap(Some(Bitmap {
+            bits: vec![0, 1, 1, 1, 1, 1],
+        }));
 
         let b = BucketColumn::from_hash(hash, 2);
         assert_eq!(*b, vec![1, 2, 0, 2, 0, 2]);
@@ -206,19 +203,16 @@ mod tests {
     #[test]
     #[should_panic]
     fn bucket_init_overflow() {
-        let hash = HashColumn::new(
-            vec![1, 2, 4, 6, 8, 10],
-            Some(Bitmap {
-                bits: vec![0, 1, 1, 1, 1, 1],
-            }),
-        );
+        let hash = HashColumn::new(vec![1, 2, 4, 6, 8, 10]).with_bitmap(Some(Bitmap {
+            bits: vec![0, 1, 1, 1, 1, 1],
+        }));
 
         let _b = BucketColumn::from_hash(hash, 63);
     }
 
     #[test]
     fn bucket_map_init() {
-        let hash = HashColumn::new(vec![1, 2, 4, 6, 8, 10], None);
+        let hash = HashColumn::new(vec![1, 2, 4, 6, 8, 10]);
 
         let b = BucketColumn::from_hash(hash, 2);
         assert_eq!(*b, vec![1, 2, 0, 2, 0, 2]);
@@ -229,7 +223,7 @@ mod tests {
 
     #[test]
     fn bucket_map_init_serial() {
-        let hash = HashColumn::new(vec![1, 2, 4, 6, 8, 10], None);
+        let hash = HashColumn::new(vec![1, 2, 4, 6, 8, 10]);
 
         let b = BucketColumn::from_hash(hash, 2);
         assert_eq!(*b, vec![1, 2, 0, 2, 0, 2]);
@@ -240,7 +234,7 @@ mod tests {
 
     #[test]
     fn bucket_size_map_init() {
-        let hash = HashColumn::new(vec![1, 2, 4, 6, 8, 10], None);
+        let hash = HashColumn::new(vec![1, 2, 4, 6, 8, 10]);
 
         let b = BucketColumn::from_hash(hash, 2);
         assert_eq!(*b, vec![1, 2, 0, 2, 0, 2]);
@@ -252,7 +246,7 @@ mod tests {
     }
     #[test]
     fn partition_column_test_a() {
-        let hash = HashColumn::new(vec![1, 2, 4, 6, 8, 10], None);
+        let hash = HashColumn::new(vec![1, 2, 4, 6, 8, 10]);
 
         let data = vec![1, 2, 4, 6, 8, 10];
         let b = BucketColumn::from_hash(hash, 2);
@@ -272,12 +266,9 @@ mod tests {
 
     #[test]
     fn partition_column_test_string_a() {
-        let hash = HashColumn::new(
-            vec![1, 1, 2, 3, 4, 5],
-            Some(Bitmap {
-                bits: vec![0, 1, 1, 1, 1, 1],
-            }),
-        );
+        let hash = HashColumn::new(vec![1, 1, 2, 3, 4, 5]).with_bitmap(Some(Bitmap {
+            bits: vec![0, 1, 1, 1, 1, 1],
+        }));
 
         let strvec: Vec<String> = vec![
             "aa".to_string(),
@@ -336,18 +327,15 @@ mod tests {
     fn repartition_column_test_a() {
         let data: Vec<u64> = vec![1, 2, 4, 6, 8, 10];
 
-        let hash = HashColumn::new(
-            vec![4, 1, 1, 1, 1, 3],
-            Some(Bitmap {
-                bits: vec![1, 1, 1, 1, 1, 1],
-            }),
-        );
+        let hash = HashColumn::new(vec![4, 1, 1, 1, 1, 3]).with_bitmap(Some(Bitmap {
+            bits: vec![1, 1, 1, 1, 1, 1],
+        }));
 
         let b = BucketColumn::from_hash(hash, 2);
         let bmap = BucketsSizeMap::from_bucket_column(b, 2);
         let part = data.partition_column(&None, &None, &bmap);
 
-        let hash = HashColumn::new(data, None);
+        let hash = HashColumn::new(data);
 
         let hash = hash.partition_column(&None, &None, &bmap);
 
@@ -434,19 +422,16 @@ mod tests {
         ];
         let strvec = StringVec { strvec };
 
-        let hash = HashColumn::new(
-            vec![4, 1, 1, 1, 1, 3],
-            Some(Bitmap {
-                bits: vec![1, 1, 1, 1, 1, 1],
-            }),
-        );
+        let hash = HashColumn::new(vec![4, 1, 1, 1, 1, 3]).with_bitmap(Some(Bitmap {
+            bits: vec![1, 1, 1, 1, 1, 1],
+        }));
 
         let b = BucketColumn::from_hash(hash, 2);
         let bmap = BucketsSizeMap::from_bucket_column(b, 2);
         let part = strvec.partition_column(&None, &None, &bmap);
 
         let data: Vec<u64> = vec![1, 2, 4, 6, 8, 10];
-        let hash = HashColumn::new(data, None);
+        let hash = HashColumn::new(data);
 
         let hash = hash.partition_column(&None, &None, &bmap);
         let hash = if let PartitionedColumn::FixedLenType(hash_inner, _index, _bitmap) = hash {
@@ -557,12 +542,9 @@ mod tests {
         ];
         let strvec = StringVec { strvec };
 
-        let hash = HashColumn::new(
-            vec![4, 1, 1, 1, 1, 3],
-            Some(Bitmap {
-                bits: vec![1, 1, 1, 1, 1, 1],
-            }),
-        );
+        let hash = HashColumn::new(vec![4, 1, 1, 1, 1, 3]).with_bitmap(Some(Bitmap {
+            bits: vec![1, 1, 1, 1, 1, 1],
+        }));
 
         let b = BucketColumn::from_hash(hash, 2);
         let bmap = BucketsSizeMap::from_bucket_column(b, 2);
@@ -581,12 +563,9 @@ mod tests {
     fn column_flatten_fixedlen() {
         let data: Vec<u64> = vec![1, 2, 3, 4, 5, 6];
 
-        let hash = HashColumn::new(
-            vec![4, 1, 1, 1, 1, 3],
-            Some(Bitmap {
-                bits: vec![1, 1, 1, 1, 1, 1],
-            }),
-        );
+        let hash = HashColumn::new(vec![4, 1, 1, 1, 1, 3]).with_bitmap(Some(Bitmap {
+            bits: vec![1, 1, 1, 1, 1, 1],
+        }));
 
         let b = BucketColumn::from_hash(hash, 2);
         let bmap = BucketsSizeMap::from_bucket_column(b, 2);
@@ -618,12 +597,9 @@ mod tests {
         ];
         let strvec = StringVec { strvec };
 
-        let hash = HashColumn::new(
-            vec![4, 1, 1, 1, 1, 3],
-            Some(Bitmap {
-                bits: vec![1, 1, 1, 1, 1, 1],
-            }),
-        );
+        let hash = HashColumn::new(vec![4, 1, 1, 1, 1, 3]).with_bitmap(Some(Bitmap {
+            bits: vec![1, 1, 1, 1, 1, 1],
+        }));
 
         let b = BucketColumn::from_hash(hash, 2);
         let bmap = BucketsSizeMap::from_bucket_column(b, 2);
@@ -897,8 +873,8 @@ mod tests {
     }
     #[test]
     fn hash_to_bucket() {
-        let hash_left: HashColumn = HashColumn::new(vec![2, 6, 4, 1, 8, 8, 8, 10], None);
-        let hash_right: HashColumn = HashColumn::new(vec![2, 4, 6, 8, 3, 8], None);
+        let hash_left: HashColumn = HashColumn::new(vec![2, 6, 4, 1, 8, 8, 8, 10]);
+        let hash_right: HashColumn = HashColumn::new(vec![2, 4, 6, 8, 3, 8]);
 
         let (left_index, right_index) = hash_join(&hash_left, &hash_right, 2);
         assert_eq!(left_index.len(), 9);
@@ -953,32 +929,28 @@ mod tests {
 
         let col1: Vec<ColumnWrapper> = vec![
             //let col1: Vec<Arc<OwnedColumn<Vec<u64>>>> = vec![
-            ColumnWrapper::new(
-                vec![1_u32, 2, 3],
-                None,
-                Some(Bitmap {
-                    bits: vec![1, 0, 1],
-                }),
-            ),
-            ColumnWrapper::new(vec![1_u32, 2, 3], None, None),
-            ColumnWrapper::new(vec![1_u32], Some(vec![0, 0, 0]), None),
+            ColumnWrapper::new(vec![1_u32, 2, 3]).with_bitmap(Some(Bitmap {
+                bits: vec![1, 0, 1],
+            })),
+            ColumnWrapper::new(vec![1_u32, 2, 3]),
+            ColumnWrapper::new(vec![1_u32]).with_index(Some(vec![0, 0, 0])),
         ];
         let col2: Vec<ColumnWrapper> = vec![
-            ColumnWrapper::new(vec![1_u32, 3, 3], None, None),
-            ColumnWrapper::new(vec![1_u32, 3, 3], None, None),
-            ColumnWrapper::new(vec![1_u32, 3, 3], None, None),
+            ColumnWrapper::new(vec![1_u32, 3, 3]),
+            ColumnWrapper::new(vec![1_u32, 3, 3]),
+            ColumnWrapper::new(vec![1_u32, 3, 3]),
         ];
 
         let col3: Vec<ColumnWrapper> = vec![
-            ColumnWrapper::new(vec![0_u64, 0, 0], None, None),
-            ColumnWrapper::new(vec![0_u64, 0, 0], None, None),
-            ColumnWrapper::new(vec![0_u64, 0, 0], None, None),
+            ColumnWrapper::new(vec![0_u64, 0, 0]),
+            ColumnWrapper::new(vec![0_u64, 0, 0]),
+            ColumnWrapper::new(vec![0_u64, 0, 0]),
         ];
 
         let _col4: Vec<ColumnWrapper> = vec![
-            ColumnWrapper::new(vec![4_u64, 5, 6], None, None),
-            ColumnWrapper::new(vec![4_u64, 5, 6], None, None),
-            ColumnWrapper::new(vec![4_u64, 5, 6], None, None),
+            ColumnWrapper::new(vec![4_u64, 5, 6]),
+            ColumnWrapper::new(vec![4_u64, 5, 6]),
+            ColumnWrapper::new(vec![4_u64, 5, 6]),
         ];
         let col4: Vec<u64> = vec![4, 5, 6, 4, 5, 6, 4, 5, 6];
         let expr: Expression = Expression::new(
@@ -1010,7 +982,7 @@ mod tests {
                 let (_, mut owned_values) = expr.compile(&dict);
 
                 let mut owned_values_refmut = owned_values.iter_mut().collect();
-                let c4_slice = ColumnWrapper::new_slice(c4, None, None);
+                let c4_slice = ColumnWrapper::new_slice(c4);
 
                 expr.eval(
                     &mut owned_values_refmut,
@@ -1039,17 +1011,15 @@ mod tests {
         let data_col1 = vec![4_u64, 5];
         let mut data_col2 = vec![4_u32, 5, 6];
 
-        let c1 =
-            ColumnWrapper::new_ref(&data_col1, Some(vec![0_usize, 0, 0]), None).with_name("col1");
-        let c2 = ColumnWrapper::new_ref_mut(
-            &mut data_col2,
-            None,
-            Some(Bitmap {
+        let c1 = ColumnWrapper::new_ref(&data_col1)
+            .with_index(Some(vec![0_usize, 0, 0]))
+            .with_name("col1");
+        let c2 = ColumnWrapper::new_ref_mut(&mut data_col2)
+            .with_bitmap(Some(Bitmap {
                 bits: vec![1, 1, 0],
-            }),
-        )
-        .with_name("col2");
-        let c3 = ColumnWrapper::new(vec![4_u32, 5, 6], None, None).with_name("col3");
+            }))
+            .with_name("col2");
+        let c3 = ColumnWrapper::new(vec![4_u32, 5, 6]).with_name("col3");
         let ref_columns = vec![&c1, &c2, &c3];
 
         let sqlstmt = "SELECT ((col1+col2)+col3)";
@@ -1069,7 +1039,7 @@ mod tests {
 
         assert!(!owned_columns.is_empty());
         let result = owned_columns.pop().unwrap();
-        assert_eq!(result.bitmap().as_ref().unwrap().bits, vec![1, 1, 0]);
+        assert_eq!(result.bitmap().unwrap(), vec![1, 1, 0]);
 
         let val = result.unwrap::<Vec<u64>>();
         assert_eq!(val, vec![12, 14, 0]);
@@ -1078,15 +1048,14 @@ mod tests {
     fn test_eqinit() {
         let dict: Dictionary = Dictionary::new();
 
-        let c1 = ColumnWrapper::new(
-            vec![1_u64, 2, 3],
-            None,
-            Some(Bitmap {
+        let c1 = ColumnWrapper::new(vec![1_u64, 2, 3])
+            .with_bitmap(Some(Bitmap {
                 bits: vec![1, 0, 1],
-            }),
-        )
-        .with_name("col1");
-        let c2 = ColumnWrapper::new(vec![1_u64, 2, 3], Some(vec![0, 1, 1]), None).with_name("col2");
+            }))
+            .with_name("col1");
+        let c2 = ColumnWrapper::new(vec![1_u64, 2, 3])
+            .with_index(Some(vec![0, 1, 1]))
+            .with_name("col2");
 
         let ref_columns = vec![&c1, &c2];
 
@@ -1113,19 +1082,17 @@ mod tests {
     fn test_applyoneif() {
         let dict: Dictionary = Dictionary::new();
 
-        let mut c1 = ColumnWrapper::new(
-            vec![1_u64, 2, 3, 10, 13],
-            None,
-            Some(Bitmap {
+        let mut c1 = ColumnWrapper::new(vec![1_u64, 2, 3, 10, 13])
+            .with_bitmap(Some(Bitmap {
                 bits: vec![1, 0, 1, 1, 1],
-            }),
-        )
-        .with_name("col1");
+            }))
+            .with_name("col1");
 
-        let c1_index_orig = c1.index().clone();
-        let mut c2 =
-            ColumnWrapper::new(vec![1_u64, 2, 3], Some(vec![0, 1, 1]), None).with_name("col2");
-        let c2_index_orig = c2.index().clone();
+        let c1_index_orig = c1.index().map(|v| v.to_vec());
+        let mut c2 = ColumnWrapper::new(vec![1_u64, 2, 3])
+            .with_index(Some(vec![0, 1, 1]))
+            .with_name("col2");
+        let c2_index_orig = c2.index().map(|v| v.to_vec());
 
         let sqlstmt = "SELECT col1=col2";
         let p = get_first_projection(sqlstmt);
@@ -1148,8 +1115,9 @@ mod tests {
 
         assert_eq!(index_left, vec![0, 0]);
         assert_eq!(index_right, vec![0, 0]);
-        assert_eq!(c1.index(), &c1_index_orig);
-        assert_eq!(c2.index(), &c2_index_orig);
+
+        assert_eq!(c1.index().map(|v| v.to_vec()), c1_index_orig);
+        assert_eq!(c2.index().map(|v| v.to_vec()), c2_index_orig);
         let mut t: Vec<u64> = vec![1, 2, 3, 4, 5];
         let (l, _r) = t.split_at_mut(3);
         let mut srm = SliceRefMut::new(l);
@@ -1163,13 +1131,11 @@ mod tests {
     }
     #[test]
     fn test_partition_fixedlen() {
-        let col4: Vec<u64> = vec![1, 5, 6, 4, 5, 6, 4, 5, 6, 8];
-        let mut col4 = ColumnWrapper::new(col4, None, None);
-        let signature = sig!["part"; Vec<u64>];
         let dict: Dictionary = Dictionary::new();
-        let op = dict.part.get(&signature).unwrap();
+        let col4: Vec<u64> = vec![1, 5, 6, 4, 5, 6, 4, 5, 6, 8];
+        let mut col4 = ColumnWrapper::new(col4);
 
-        let col4_part = op.part(&col4, 3);
+        let col4_part = col4.part(3, &dict);
         let mut itr = col4_part.iter().map(|c| c.downcast_slice_ref::<[u64]>());
 
         assert_eq!(itr.next(), Some(&[1_u64, 5, 6] as &[_]));
@@ -1180,8 +1146,7 @@ mod tests {
 
         let tmp = col4.downcast_mut::<Vec<u64>>();
         tmp[0] = 4;
-        let op = dict.part.get(&signature).unwrap();
-        let mut col4_part = op.part_mut(&mut col4, 3);
+        let mut col4_part = col4.part_mut(3, &dict);
         col4_part
             .iter_mut()
             .for_each(|c| c.downcast_slice_mut::<[u64]>()[0] -= 1);
@@ -1195,14 +1160,12 @@ mod tests {
     }
     #[test]
     fn test_partition_variablelen() {
+        let dict: Dictionary = Dictionary::new();
         let col4: Vec<u64> = vec![1, 5, 6, 4, 5, 6, 4, 5, 6, 8];
         let chunks_size: Vec<usize> = vec![3, 3, 3, 1];
-        let mut col4 = ColumnWrapper::new(col4, None, None);
-        let signature = sig!["part"; Vec<u64>];
-        let dict: Dictionary = Dictionary::new();
-        let op = dict.part.get(&signature).unwrap();
+        let mut col4 = ColumnWrapper::new(col4);
 
-        let col4_part = op.part_with_sizes(&col4, &chunks_size);
+        let col4_part = col4.part_with_sizes(&chunks_size, &dict);
         let mut itr = col4_part.iter().map(|c| c.downcast_slice_ref::<[u64]>());
 
         assert_eq!(itr.next(), Some(&[1_u64, 5, 6] as &[_]));
@@ -1213,8 +1176,7 @@ mod tests {
 
         let tmp = col4.downcast_mut::<Vec<u64>>();
         tmp[0] = 4;
-        let op = dict.part.get(&signature).unwrap();
-        let mut col4_part = op.part_with_sizes_mut(&mut col4, &chunks_size);
+        let mut col4_part = col4.part_with_sizes_mut(&chunks_size, &dict);
         col4_part
             .iter_mut()
             .for_each(|c| c.downcast_slice_mut::<[u64]>()[0] -= 1);
@@ -1232,27 +1194,23 @@ mod tests {
         let dict: Dictionary = Dictionary::new();
 
         let len_orig = col4.len();
-        let mut col4 = ColumnWrapper::new(col4, None, None);
 
-        let signature = sig!["len"; Vec<u64>];
-        let len_data = dict.len_data.get(&signature).unwrap();
-        let len_column = len_data(&col4);
+        let mut col4 = ColumnWrapper::new(col4);
+        assert_eq!(len_orig, col4.len_data(&dict));
 
-        let signature = sig!["part"; Vec<u64>];
-        let op = dict.part.get(&signature).unwrap();
+        let col4_part = col4.part(3, &dict);
+        assert_eq!(
+            len_orig,
+            col4_part.iter().map(|c| c.len(&dict)).sum::<usize>()
+        );
 
-        let col4_part = op.part_mut(&mut col4, 3);
-        let signature = sig!["len"; [u64]];
-        let len_data = dict.len_data.get(&signature).unwrap();
-        let len_column_partitioned_mut: usize = col4_part.iter().map(|c| len_data(c)).sum();
-
-        let col4_part = op.part(&mut col4, 6);
-        let signature = sig!["len"; [u64]];
-        let len_data = dict.len_data.get(&signature).unwrap();
-        let len_column_partitioned: usize = col4_part.iter().map(|c| len_data(c)).sum();
-
-        assert_eq!(len_orig, len_column);
-        assert_eq!(len_orig, len_column_partitioned_mut);
-        assert_eq!(len_orig, len_column_partitioned);
+        let mut col4_part_mut = col4.part_mut(3, &dict);
+        assert_eq!(
+            len_orig,
+            col4_part_mut
+                .iter_mut()
+                .map(|c| c.len(&dict))
+                .sum::<usize>()
+        );
     }
 }

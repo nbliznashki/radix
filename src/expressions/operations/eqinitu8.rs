@@ -1,10 +1,6 @@
 use crate::bitmap::Bitmap;
 use crate::*;
 
-use std::hash::{BuildHasher, Hash, Hasher};
-use std::ops::AddAssign;
-
-#[allow(dead_code)]
 const OP: &str = "==";
 
 pub(crate) fn load_op_dict(dict: &mut OpDictionary) {
@@ -29,29 +25,13 @@ fn eqinit_vecu64_columnu8(output: &mut ColumnWrapper, input: Vec<InputTypes>) {
     let (data_output, index_output, bitmap_output) = output.all_mut::<Vec<bool>>();
 
     let (data_input_lhs, index_input_lhs, bitmap_input_lhs) = match &input[0] {
-        InputTypes::Ref(a) => (
-            a.downcast_ref::<T1>(),
-            a.index().as_ref(),
-            a.bitmap().as_ref(),
-        ),
-        InputTypes::Owned(a) => (
-            a.downcast_ref::<T1>(),
-            a.index().as_ref(),
-            a.bitmap().as_ref(),
-        ),
+        InputTypes::Ref(a) => (a.downcast_ref::<T1>(), a.index(), a.bitmap()),
+        InputTypes::Owned(a) => (a.downcast_ref::<T1>(), a.index(), a.bitmap()),
     };
 
     let (data_input_rhs, index_input_rhs, bitmap_input_rhs) = match &input[1] {
-        InputTypes::Ref(a) => (
-            a.downcast_ref::<T2>(),
-            a.index().as_ref(),
-            a.bitmap().as_ref(),
-        ),
-        InputTypes::Owned(a) => (
-            a.downcast_ref::<T2>(),
-            a.index().as_ref(),
-            a.bitmap().as_ref(),
-        ),
+        InputTypes::Ref(a) => (a.downcast_ref::<T2>(), a.index(), a.bitmap()),
+        InputTypes::Owned(a) => (a.downcast_ref::<T2>(), a.index(), a.bitmap()),
     };
 
     let len_input_rhs = if let Some(ind) = index_input_rhs {
@@ -80,17 +60,17 @@ fn eqinit_vecu64_columnu8(output: &mut ColumnWrapper, input: Vec<InputTypes>) {
 
         if let Some(bitm_lhs) = &bitmap_input_lhs {
             if let Some(ind_lhs) = &index_input_lhs {
-                v.extend(ind_lhs.iter().map(|i| bitm_lhs.bits[*i]))
+                v.extend(ind_lhs.iter().map(|i| bitm_lhs[*i]))
             } else {
-                v.extend(bitm_lhs.bits.iter())
+                v.extend(bitm_lhs.iter())
             }
         };
         if v.len() == 0 {
             if let Some(bitm_rhs) = &bitmap_input_rhs {
                 if let Some(ind_rhs) = &index_input_rhs {
-                    v.extend(ind_rhs.iter().map(|i| bitm_rhs.bits[*i]))
+                    v.extend(ind_rhs.iter().map(|i| bitm_rhs[*i]))
                 } else {
-                    v.extend(bitm_rhs.bits.iter())
+                    v.extend(bitm_rhs.iter())
                 }
             };
         } else {
@@ -98,10 +78,10 @@ fn eqinit_vecu64_columnu8(output: &mut ColumnWrapper, input: Vec<InputTypes>) {
                 if let Some(ind_rhs) = &index_input_rhs {
                     v.iter_mut()
                         .zip(ind_rhs.iter())
-                        .for_each(|(b, i)| *b &= bitm_rhs.bits[*i])
+                        .for_each(|(b, i)| *b &= bitm_rhs[*i])
                 } else {
                     v.iter_mut()
-                        .zip(bitm_rhs.bits.iter())
+                        .zip(bitm_rhs.iter())
                         .for_each(|(b, bl)| *b &= *bl)
                 }
             };
@@ -186,7 +166,7 @@ fn eqinit_vecu64_columnu8(output: &mut ColumnWrapper, input: Vec<InputTypes>) {
                     .iter()
                     .zip(slice_start_pos_rhs.iter().zip(slice_len_rhs.iter()))
                     .zip(bits.iter())
-                    .map(|(((li, (rs, rl))), b)| {
+                    .map(|((li, (rs, rl)), b)| {
                         if *b != 0 {
                             data_lhs[slice_start_pos_lhs[*li]
                                 ..slice_start_pos_lhs[*li] + slice_len_lhs[*li]]
