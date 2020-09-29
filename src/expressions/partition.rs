@@ -19,9 +19,9 @@ impl<'a, T> ChunksSizedMut<'a, T> {
             None
         }
     }
-    fn is_empty(&self) -> bool {
-        self.v.len() == 0
-    }
+    //fn is_empty(&self) -> bool {
+    //    self.v.len() == 0
+    //}
 }
 
 pub trait ColumnPartitionInner {
@@ -29,22 +29,22 @@ pub trait ColumnPartitionInner {
         &self,
         inp: &'b ColumnWrapper<'a>,
         chunk_size: usize,
-    ) -> Vec<ColumnWrapper<'b>>;
+    ) -> Result<Vec<ColumnWrapper<'b>>, ErrorDesc>;
     fn part_mut<'a: 'b, 'b>(
         &self,
         inp: &'b mut ColumnWrapper<'a>,
         chunk_size: usize,
-    ) -> Vec<ColumnWrapper<'b>>;
+    ) -> Result<Vec<ColumnWrapper<'b>>, ErrorDesc>;
     fn part_with_sizes<'a: 'b, 'b>(
         &self,
         inp: &'b ColumnWrapper<'a>,
         chunks_size: &Vec<usize>,
-    ) -> Vec<ColumnWrapper<'b>>;
+    ) -> Result<Vec<ColumnWrapper<'b>>, ErrorDesc>;
     fn part_with_sizes_mut<'a: 'b, 'b>(
         &self,
         inp: &'b mut ColumnWrapper<'a>,
         chunks_size: &Vec<usize>,
-    ) -> Vec<ColumnWrapper<'b>>;
+    ) -> Result<Vec<ColumnWrapper<'b>>, ErrorDesc>;
 }
 
 pub type PartitionDictionary = HashMap<Signature, Box<dyn ColumnPartitionInner>>;
@@ -78,16 +78,15 @@ macro_rules! binary_operation_impl {
             }
             impl ColumnPartitionInner for [<ColumnPartitionVec $tr>]
             {
-                fn part<'a: 'b, 'b>(&self, inp: &'b ColumnWrapper<'a>, chunk_size: usize) -> Vec<ColumnWrapper<'b>>
+                fn part<'a: 'b, 'b>(&self, inp: &'b ColumnWrapper<'a>, chunk_size: usize) -> Result<Vec<ColumnWrapper<'b>>,ErrorDesc>
                 {
                 type V=Vec<$tr>;
-                let (data_input, index_input, bitmap_input) = (inp.downcast_ref::<V>(), inp.index(), inp.bitmap());
+                let (data_input, index_input, bitmap_input) = (inp.downcast_ref::<V>()?, inp.index(), inp.bitmap());
 
                 match index_input {
                     Some(ind) => ind
                         .chunks(chunk_size)
-                        .map(|ind| inp.copy_inner_as_ref().with_index_slice(ind))
-                        .collect(),
+                        .try_fold(Vec::with_capacity((ind.len()+chunk_size-1)/std::cmp::max(chunk_size,1)), |mut acc, ind| {acc.push(inp.copy_inner_as_ref()?.with_index_slice(ind)); Ok(acc)}),
                     None => {
                         let mut output: Vec<ColumnWrapper<'b>>=data_input.chunks(chunk_size).map(|c| ColumnWrapper::new_slice(c)).collect();
                         if let Some(b) = bitmap_input {
@@ -95,18 +94,18 @@ macro_rules! binary_operation_impl {
                                 .zip(b.chunks(chunk_size))
                                 .map(|(c, b)| c.with_bitmap_slice(b)).collect();
                         }
-                        output
+                        Ok(output)
                     }
                 }
             }
 
-            fn part_mut<'a: 'b, 'b>(&self, inp: &'b mut ColumnWrapper<'a>, chunk_size: usize) -> Vec<ColumnWrapper<'b>>
+            fn part_mut<'a: 'b, 'b>(&self, inp: &'b mut ColumnWrapper<'a>, chunk_size: usize) -> Result<Vec<ColumnWrapper<'b>>, ErrorDesc>
                 {
                 type V=Vec<$tr>;
-                let (data_input, index_input, bitmap_input) = inp.all_mut::<V>();
+                let (data_input, index_input, bitmap_input) = inp.all_mut::<V>()?;
 
                 if let Some(_) = index_input {
-                    panic!("Can't partition a column with an index into mutable parts")
+                    Err("Can't partition a column with an index into mutable parts")?
                 };
 
 
@@ -116,17 +115,17 @@ macro_rules! binary_operation_impl {
                         .zip(b.bits.chunks_mut(chunk_size))
                         .map(|(c, b)| c.with_bitmap_slice_mut(b)).collect();
                 }
-                output
+                Ok(output)
             }
 
             fn part_with_sizes<'a: 'b, 'b>(
                 &self,
                 inp: &'b ColumnWrapper<'a>,
                 chunks_size: &Vec<usize>,
-            ) -> Vec<ColumnWrapper<'b>>{
+            ) -> Result<Vec<ColumnWrapper<'b>>, ErrorDesc>{
 
                 type V=Vec<$tr>;
-                let (data_input, index_input, bitmap_input) = (inp.downcast_ref::<V>(), inp.index(), inp.bitmap());
+                let (data_input, index_input, bitmap_input) = (inp.downcast_ref::<V>()?, inp.index(), inp.bitmap());
 
                 let mut output: Vec<ColumnWrapper<'b>>=Vec::with_capacity(chunks_size.len());
 
@@ -134,19 +133,26 @@ macro_rules! binary_operation_impl {
 
                 match index_input {
                     Some(ind) => {
-                        assert_eq!(ind.len(), total_len);
+                        if ind.len()!=total_len {
+                            Err(format!("Trying to partition an index with length {} into parts with total length {}", ind.len(), total_len))?
+                        };
                         let mut cur_slice=ind;
-                        chunks_size.iter().for_each(|l|{
+                        chunks_size.iter().try_fold(Vec::with_capacity(chunks_size.len()), |mut acc, l| {
                             let (l,r)=cur_slice.split_at(*l);
                             cur_slice=r;
-                            output.push(inp.copy_inner_as_ref().with_index_slice(l));
-                        });
+                            acc.push(inp.copy_inner_as_ref()?.with_index_slice(l));
+                            Ok(acc)
+                        })
                     }
                     None => {
-                        assert_eq!(data_input.len(), total_len);
+                        if data_input.len()!=total_len {
+                            Err(format!("Trying to partition a data object with length {} into parts with total length {}", data_input.len(), total_len))?
+                        };
                         let mut cur_slice_data=data_input.as_slice();
                         if let Some(bitmap)=bitmap_input{
-                            assert_eq!(bitmap.len(), total_len);
+                            if bitmap.len()!=total_len{
+                                Err(format!("Trying to partition a data object with bitmap index of length {} into parts with total length {}", bitmap.len(), total_len))?
+                            };
                             let mut cur_slice_bitmap=bitmap;
                             chunks_size.iter().for_each(|l|{
                                 let (l_data,r)=cur_slice_data.split_at(*l);
@@ -162,32 +168,37 @@ macro_rules! binary_operation_impl {
                                 output.push(ColumnWrapper::new_slice(l_data));
                             });
                         }
+                        Ok(output)
                     }
                 }
-                output
+
             }
             fn part_with_sizes_mut<'a: 'b, 'b>(
                 &self,
                 inp: &'b mut ColumnWrapper<'a>,
                 chunks_size: &Vec<usize>,
-            ) -> Vec<ColumnWrapper<'b>>{
+            ) -> Result<Vec<ColumnWrapper<'b>>, ErrorDesc>{
 
                 type V=Vec<$tr>;
-                let (data_input, index_input, bitmap_input) = inp.all_mut::<V>();
+                let (data_input, index_input, bitmap_input) = inp.all_mut::<V>()?;
 
                 let total_len=chunks_size.iter().sum::<usize>();
 
                 if let Some(_) = index_input {
-                    panic!("Can't partition a column with an index into mutable parts")
+                    Err("Can't partition a column with an index into mutable parts")?
                 };
 
-                assert_eq!(data_input.len(), total_len);
+                if data_input.len()!=total_len {
+                    Err(format!("Trying to partition a data object with length {} into parts with total length {}", data_input.len(), total_len))?
+                };
 
                 let mut output: Vec<ColumnWrapper<'b>>=Vec::with_capacity(chunks_size.len());
                 let mut cur_slice_data=ChunksSizedMut{v: data_input.as_mut_slice()};
 
                 if let Some(bitmap)=bitmap_input{
-                    assert_eq!(bitmap.len(), total_len);
+                    if bitmap.len()!=total_len{
+                        Err(format!("Trying to partition a data object with bitmap index of length {} into parts with total length {}", bitmap.len(), total_len))?
+                    };
                     let mut cur_slice_bitmap=ChunksSizedMut{v: bitmap.bits.as_mut_slice()};
                     chunks_size.iter().for_each(|i|{
                         let r_data=cur_slice_data.next_exact(*i).unwrap();
@@ -200,7 +211,7 @@ macro_rules! binary_operation_impl {
                         output.push(ColumnWrapper::new_slice_mut(r));
                     });
                 }
-                output
+                Ok(output)
             }
         }
     }

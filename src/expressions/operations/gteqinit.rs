@@ -20,7 +20,7 @@ macro_rules! operation_load {
 macro_rules! operation_impl {
     ($(($tl:ty, $tr:ty))+) => ($(
         paste! {
-            fn [<ge_vec $tl:lower _ vec $tr:lower>](output: &mut ColumnWrapper, input: Vec<InputTypes>) {
+            fn [<ge_vec $tl:lower _ vec $tr:lower>](output: &mut ColumnWrapper, input: Vec<InputTypes>)->Result<(),ErrorDesc> {
 
                 type T1=$tl;
                 type T2=$tr;
@@ -30,16 +30,16 @@ macro_rules! operation_impl {
                 //right[0]-->input
                 //if right[0] and right[1]-> input_lhs, input_rhs
 
-                let (data_output, index_output, bitmap_output) = output.all_mut::<Vec<bool>>();
+                let (data_output, index_output, bitmap_output) = output.all_mut::<Vec<bool>>()?;
 
                 let (data_input_lhs, index_input_lhs, bitmap_input_lhs) = match &input[0] {
-                    InputTypes::Ref(a)=>(a.downcast_ref::<Vec<T1>>(), a.index(), a.bitmap()),
-                    InputTypes::Owned(a)=>(a.downcast_ref::<Vec<T1>>(), a.index(), a.bitmap())
+                    InputTypes::Ref(a)=>(a.downcast_ref::<Vec<T1>>()?, a.index(), a.bitmap()),
+                    InputTypes::Owned(a)=>(a.downcast_ref::<Vec<T1>>()?, a.index(), a.bitmap())
                 };
 
                 let (data_input_rhs, index_input_rhs, bitmap_input_rhs) = match &input[1] {
-                    InputTypes::Ref(a)=>(a.downcast_ref::<Vec<T2>>(), a.index(), a.bitmap()),
-                    InputTypes::Owned(a)=>(a.downcast_ref::<Vec<T2>>(), a.index(), a.bitmap())
+                    InputTypes::Ref(a)=>(a.downcast_ref::<Vec<T2>>()?, a.index(), a.bitmap()),
+                    InputTypes::Owned(a)=>(a.downcast_ref::<Vec<T2>>()?, a.index(), a.bitmap())
                 };
 
 
@@ -55,7 +55,13 @@ macro_rules! operation_impl {
                     data_input_lhs.len()
                 };
 
-                assert_eq!(len_input_rhs, len_input_lhs);
+                //The two input columns should have the same length
+                if len_input_rhs != len_input_lhs {
+                    Err(format!(
+                        "The two input columns should have the same length, but they are {} and {} respectively",
+                        len_input_lhs, len_input_rhs
+                    ))?
+                };
 
                 //Clean up
                 data_output.truncate(0);
@@ -179,6 +185,8 @@ macro_rules! operation_impl {
                 if let Some(bits)=bits_new{
                     *bitmap_output=Some(Bitmap{bits})
                 };
+
+                Ok(())
 
 
             }

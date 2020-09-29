@@ -24,7 +24,7 @@ macro_rules! binary_operation_impl {
     ($($tr:ty)+) => ($(
             #[allow(dead_code)]
             paste!{
-            fn [<hash_vecu64_vec_ $tr:lower>](output: &mut ColumnWrapper, input: Vec<InputTypes>)  {
+            fn [<hash_vecu64_vec_ $tr:lower>](output: &mut ColumnWrapper, input: Vec<InputTypes>)->Result<(),ErrorDesc>  {
 
                 let rs=ahash::RandomState::with_seeds(1234,5678);
 
@@ -36,11 +36,11 @@ macro_rules! binary_operation_impl {
                 //right[0]-->input
                 //if right[0] and right[1]-> input_lhs, input_rhs
 
-                let (data_output, index_output, bitmap_output) = output.all_mut::<Vec<T1>>();
+                let (data_output, index_output, bitmap_output) = output.all_mut::<Vec<T1>>()?;
 
                 let (data_input, index_input, bitmap_input) = match &input[0] {
-                    InputTypes::Ref(a)=>(a.downcast_ref::<Vec<T1>>(), a.index(), a.bitmap()),
-                    InputTypes::Owned(a)=>(a.downcast_ref::<Vec<T1>>(), a.index(), a.bitmap())
+                    InputTypes::Ref(a)=>(a.downcast_ref::<Vec<T1>>()?, a.index(), a.bitmap()),
+                    InputTypes::Owned(a)=>(a.downcast_ref::<Vec<T1>>()?, a.index(), a.bitmap())
                 };
 
                 let len_input = if let Some(ind) = index_input {
@@ -98,6 +98,7 @@ macro_rules! binary_operation_impl {
                         *bitmap_output=Some(Bitmap{bits: bmap.iter().map(|i| *i).collect()});
                     }
                 }
+                Ok(())
             }
 
     }

@@ -969,7 +969,7 @@ mod tests {
             vec![Binding::RefColumn(3)],
         );
 
-        let (ops, owned_values) = expr.compile(&dict);
+        let (ops, owned_values) = expr.compile(&dict).unwrap();
         assert_eq!(owned_values.len(), 2);
         assert_eq!(ops.len(), 3);
 
@@ -979,7 +979,7 @@ mod tests {
             .zip(col3.iter())
             .zip(col4.chunks(3))
             .map(|(((c1, c2), c3), c4)| {
-                let (_, mut owned_values) = expr.compile(&dict);
+                let (_, mut owned_values) = expr.compile(&dict).unwrap();
 
                 let mut owned_values_refmut = owned_values.iter_mut().collect();
                 let c4_slice = ColumnWrapper::new_slice(c4);
@@ -989,7 +989,8 @@ mod tests {
                     &vec![c1, c2, c3, &c4_slice],
                     &vec![],
                     &dict,
-                );
+                )
+                .unwrap();
 
                 owned_values.pop().unwrap()
             })
@@ -997,7 +998,10 @@ mod tests {
 
         drop(col2);
 
-        let output: Vec<Vec<u64>> = output.into_iter().map(|c| c.unwrap::<Vec<u64>>()).collect();
+        let output: Vec<Vec<u64>> = output
+            .into_iter()
+            .map(|c| c.unwrap::<Vec<u64>>().unwrap())
+            .collect();
 
         assert_eq!(output[0], &[6, 0, 12]);
         assert_eq!(output[1], &[6, 10, 12]);
@@ -1024,15 +1028,16 @@ mod tests {
 
         let sqlstmt = "SELECT ((col1+col2)+col3)";
         let p = get_first_projection(sqlstmt);
-        let expr = parseexpr(&p, &ref_columns, &dict);
+        let expr = parseexpr(&p, &ref_columns, &dict).unwrap();
 
-        let mut owned_columns = expr.compile(&dict).1;
+        let mut owned_columns = expr.compile(&dict).unwrap().1;
         expr.eval(
             &mut owned_columns.iter_mut().collect(),
             &ref_columns,
             &vec![],
             &dict,
-        );
+        )
+        .unwrap();
 
         drop(data_col2);
         drop(data_col1);
@@ -1042,7 +1047,7 @@ mod tests {
         assert_eq!(result.bitmap().unwrap(), vec![1, 1, 0]);
 
         let val = result.unwrap::<Vec<u64>>();
-        assert_eq!(val, vec![12, 14, 0]);
+        assert_eq!(val.unwrap(), vec![12, 14, 0]);
     }
     #[test]
     fn test_eqinit() {
@@ -1061,21 +1066,22 @@ mod tests {
 
         let sqlstmt = "SELECT col1=col2";
         let p = get_first_projection(sqlstmt);
-        let expr = parseexpr(&p, &ref_columns, &dict);
+        let expr = parseexpr(&p, &ref_columns, &dict).unwrap();
 
-        let mut owned_columns = expr.compile(&dict).1;
+        let mut owned_columns = expr.compile(&dict).unwrap().1;
         expr.eval(
             &mut owned_columns.iter_mut().collect(),
             &ref_columns,
             &vec![],
             &dict,
-        );
+        )
+        .unwrap();
 
         assert!(!owned_columns.is_empty());
         let result = owned_columns.pop().unwrap();
 
         let val = result.unwrap::<Vec<bool>>();
-        assert_eq!(val, vec![true, false, false]);
+        assert_eq!(val.unwrap(), vec![true, false, false]);
     }
 
     #[test]
@@ -1097,7 +1103,7 @@ mod tests {
         let sqlstmt = "SELECT col1=col2";
         let p = get_first_projection(sqlstmt);
         let ref_columns = vec![&c1, &c2];
-        let expr = parseexpr(&p, &ref_columns, &dict);
+        let expr = parseexpr(&p, &ref_columns, &dict).unwrap();
 
         //println!("{:?}", expr);
 
@@ -1111,7 +1117,8 @@ mod tests {
             &mut index_right,
             &expr,
             &dict,
-        );
+        )
+        .unwrap();
 
         assert_eq!(index_left, vec![0, 0]);
         assert_eq!(index_right, vec![0, 0]);
@@ -1135,8 +1142,10 @@ mod tests {
         let col4: Vec<u64> = vec![1, 5, 6, 4, 5, 6, 4, 5, 6, 8];
         let mut col4 = ColumnWrapper::new(col4);
 
-        let col4_part = col4.part(3, &dict);
-        let mut itr = col4_part.iter().map(|c| c.downcast_slice_ref::<[u64]>());
+        let col4_part = col4.part(3, &dict).unwrap();
+        let mut itr = col4_part
+            .iter()
+            .map(|c| c.downcast_slice_ref::<[u64]>().unwrap());
 
         assert_eq!(itr.next(), Some(&[1_u64, 5, 6] as &[_]));
         assert_eq!(itr.next(), Some(&[4_u64, 5, 6] as &[_]));
@@ -1144,13 +1153,15 @@ mod tests {
         assert_eq!(itr.next(), Some(&[8_u64] as &[_]));
         assert_eq!(itr.next(), None);
 
-        let tmp = col4.downcast_mut::<Vec<u64>>();
+        let tmp = col4.downcast_mut::<Vec<u64>>().unwrap();
         tmp[0] = 4;
-        let mut col4_part = col4.part_mut(3, &dict);
+        let mut col4_part = col4.part_mut(3, &dict).unwrap();
         col4_part
             .iter_mut()
-            .for_each(|c| c.downcast_slice_mut::<[u64]>()[0] -= 1);
-        let mut itr = col4_part.iter().map(|c| c.downcast_slice_ref::<[u64]>());
+            .for_each(|c| c.downcast_slice_mut::<[u64]>().unwrap()[0] -= 1);
+        let mut itr = col4_part
+            .iter()
+            .map(|c| c.downcast_slice_ref::<[u64]>().unwrap());
 
         assert_eq!(itr.next(), Some(&[3_u64, 5, 6] as &[_]));
         assert_eq!(itr.next(), Some(&[3_u64, 5, 6] as &[_]));
@@ -1165,8 +1176,10 @@ mod tests {
         let chunks_size: Vec<usize> = vec![3, 3, 3, 1];
         let mut col4 = ColumnWrapper::new(col4);
 
-        let col4_part = col4.part_with_sizes(&chunks_size, &dict);
-        let mut itr = col4_part.iter().map(|c| c.downcast_slice_ref::<[u64]>());
+        let col4_part = col4.part_with_sizes(&chunks_size, &dict).unwrap();
+        let mut itr = col4_part
+            .iter()
+            .map(|c| c.downcast_slice_ref::<[u64]>().unwrap());
 
         assert_eq!(itr.next(), Some(&[1_u64, 5, 6] as &[_]));
         assert_eq!(itr.next(), Some(&[4_u64, 5, 6] as &[_]));
@@ -1174,13 +1187,15 @@ mod tests {
         assert_eq!(itr.next(), Some(&[8_u64] as &[_]));
         assert_eq!(itr.next(), None);
 
-        let tmp = col4.downcast_mut::<Vec<u64>>();
+        let tmp = col4.downcast_mut::<Vec<u64>>().unwrap();
         tmp[0] = 4;
-        let mut col4_part = col4.part_with_sizes_mut(&chunks_size, &dict);
+        let mut col4_part = col4.part_with_sizes_mut(&chunks_size, &dict).unwrap();
         col4_part
             .iter_mut()
-            .for_each(|c| c.downcast_slice_mut::<[u64]>()[0] -= 1);
-        let mut itr = col4_part.iter().map(|c| c.downcast_slice_ref::<[u64]>());
+            .for_each(|c| c.downcast_slice_mut::<[u64]>().unwrap()[0] -= 1);
+        let mut itr = col4_part
+            .iter()
+            .map(|c| c.downcast_slice_ref::<[u64]>().unwrap());
 
         assert_eq!(itr.next(), Some(&[3_u64, 5, 6] as &[_]));
         assert_eq!(itr.next(), Some(&[3_u64, 5, 6] as &[_]));
@@ -1196,20 +1211,23 @@ mod tests {
         let len_orig = col4.len();
 
         let mut col4 = ColumnWrapper::new(col4);
-        assert_eq!(len_orig, col4.len_data(&dict));
+        assert_eq!(len_orig, col4.len_data(&dict).unwrap());
 
-        let col4_part = col4.part(3, &dict);
+        let col4_part = col4.part(3, &dict).unwrap();
         assert_eq!(
             len_orig,
-            col4_part.iter().map(|c| c.len(&dict)).sum::<usize>()
+            col4_part
+                .iter()
+                .map(|c| c.len(&dict).unwrap())
+                .sum::<usize>()
         );
 
-        let mut col4_part_mut = col4.part_mut(3, &dict);
+        let mut col4_part_mut = col4.part_mut(3, &dict).unwrap();
         assert_eq!(
             len_orig,
             col4_part_mut
                 .iter_mut()
-                .map(|c| c.len(&dict))
+                .map(|c| c.len(&dict).unwrap())
                 .sum::<usize>()
         );
     }

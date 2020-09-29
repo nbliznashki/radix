@@ -65,87 +65,87 @@ macro_rules! operation_load {
 macro_rules! operation_impl {
     ($(($tl:ty, $tr:ty))+) => ($(
         paste!   {
-            fn [<addassign_vec $tl:lower _ vec $tr:lower>](output: &mut ColumnWrapper, input: Vec<InputTypes>)
+            fn [<addassign_vec $tl:lower _ vec $tr:lower>](output: &mut ColumnWrapper, input: Vec<InputTypes>)->Result<(),ErrorDesc>
             {
                 //Vec Vec
                 type V1=Vec<$tl>;
                 type V2=Vec<$tr>;
-                let (data_output, index_output, bitmap_output) = output.all_mut::<V1>();
+                let (data_output, index_output, bitmap_output) = output.all_mut::<V1>()?;
                 let (data_input, index_input, bitmap_input) = match &input[0] {
                     InputTypes::Ref(a) => (
-                        a.downcast_ref::<V2>(),
+                        a.downcast_ref::<V2>()?,
                         a.index(),
                         a.bitmap(),
                     ),
                     InputTypes::Owned(a) => (
-                        a.downcast_ref::<V2>(),
+                        a.downcast_ref::<V2>()?,
                         a.index(),
                         a.bitmap(),
                     ),
                 };
-                addassign_c(data_output, index_output,bitmap_output, data_input, index_input, bitmap_input);
+                addassign_c(data_output, index_output,bitmap_output, data_input, index_input, bitmap_input)
             }
-            fn [<addassign_slice $tl:lower _ slice $tr:lower>](output: &mut ColumnWrapper, input: Vec<InputTypes>)
+            fn [<addassign_slice $tl:lower _ slice $tr:lower>](output: &mut ColumnWrapper, input: Vec<InputTypes>)->Result<(),ErrorDesc>
             {
                 //Slice Slice
                 type V1=[$tl];
                 type V2=[$tr];
-                let (data_output, index_output, bitmap_output) = output.slice_all_mut::<V1>();
+                let (data_output, index_output, bitmap_output) = output.slice_all_mut::<V1>()?;
                 let (data_input, index_input, bitmap_input) = match &input[0] {
                     InputTypes::Ref(a) => (
-                        a.downcast_slice_ref::<V2>(),
+                        a.downcast_slice_ref::<V2>()?,
                         a.index(),
                         a.bitmap(),
                     ),
                     InputTypes::Owned(a) => (
-                        a.downcast_slice_ref::<V2>(),
+                        a.downcast_slice_ref::<V2>()?,
                         a.index(),
                         a.bitmap(),
                     ),
                 };
-                addassign_c(data_output, index_output,bitmap_output, data_input, index_input, bitmap_input);
+                addassign_c(data_output, index_output,bitmap_output, data_input, index_input, bitmap_input)
             }
-            fn [<addassign_vec $tl:lower _ slice $tr:lower>](output: &mut ColumnWrapper, input: Vec<InputTypes>)
+            fn [<addassign_vec $tl:lower _ slice $tr:lower>](output: &mut ColumnWrapper, input: Vec<InputTypes>)->Result<(),ErrorDesc>
             {
                 //Vec Slice
                 type V1=Vec<$tl>;
                 type V2=[$tr];
 
-                let (data_output, index_output, bitmap_output) = output.all_mut::<V1>();
+                let (data_output, index_output, bitmap_output) = output.all_mut::<V1>()?;
 
                 let (data_input, index_input, bitmap_input) = match &input[0] {
                     InputTypes::Ref(a) => (
-                        a.downcast_slice_ref::<V2>(),
+                        a.downcast_slice_ref::<V2>()?,
                         a.index(),
                         a.bitmap(),
                     ),
                     InputTypes::Owned(a) => (
-                        a.downcast_slice_ref::<V2>(),
+                        a.downcast_slice_ref::<V2>()?,
                         a.index(),
                         a.bitmap(),
                     ),
                 };
-                addassign_c(data_output, index_output,bitmap_output, data_input, index_input, bitmap_input);
+                addassign_c(data_output, index_output,bitmap_output, data_input, index_input, bitmap_input)
             }
-            fn [<addassign_slice $tl:lower _ vec $tr:lower>](output: &mut ColumnWrapper, input: Vec<InputTypes>)
+            fn [<addassign_slice $tl:lower _ vec $tr:lower>](output: &mut ColumnWrapper, input: Vec<InputTypes>)->Result<(),ErrorDesc>
             {
                 //Slice Vec
                 type V1=[$tl];
                 type V2=Vec<$tr>;
-                let (data_output, index_output, bitmap_output) = output.slice_all_mut::<V1>();
+                let (data_output, index_output, bitmap_output) = output.slice_all_mut::<V1>()?;
                 let (data_input, index_input, bitmap_input) = match &input[0] {
                     InputTypes::Ref(a) => (
-                        a.downcast_ref::<V2>(),
+                        a.downcast_ref::<V2>()?,
                         a.index(),
                         a.bitmap(),
                     ),
                     InputTypes::Owned(a) => (
-                        a.downcast_ref::<V2>(),
+                        a.downcast_ref::<V2>()?,
                         a.index(),
                         a.bitmap(),
                     ),
                 };
-                addassign_c(data_output, index_output,bitmap_output, data_input, index_input, bitmap_input);
+                addassign_c(data_output, index_output,bitmap_output, data_input, index_input, bitmap_input)
             }
         }
     )+)
@@ -168,7 +168,8 @@ fn addassign_c<T1, T2>(
     data_input: &[T2],
     index_input: ColumnIndexRef,
     bitmap_input: Option<&[u8]>,
-) where
+) -> Result<(), ErrorDesc>
+where
     T1: AddAssign,
     T1: From<T2>,
     T1: Default,
@@ -182,7 +183,12 @@ fn addassign_c<T1, T2>(
     //The output column should have no index
     //Otherwise an element of the output vector can be updated twice if
     //it is indexed twice in the index vector
-    assert_eq!(index_output, &None);
+    if let Some(_) = index_output {
+        Err(format!(
+            "The output column for operation {} can't have an index",
+            OP
+        ))?
+    };
 
     let len_output = data_output.len();
     let len_input = if let Some(ind) = index_input {
@@ -192,7 +198,12 @@ fn addassign_c<T1, T2>(
     };
 
     //The input and output columns should have the same length
-    assert_eq!(len_output, len_input);
+    if len_output != len_input {
+        Err(format!(
+            "The input and output columns should have the same length, but they are {} and {} respectively",
+            len_input, len_output
+        ))?
+    };
 
     match (&index_input, &bitmap_output, &bitmap_input) {
         (Some(ind), None, None) => data_output
@@ -298,4 +309,6 @@ fn addassign_c<T1, T2>(
         };
         *bitmap_output = Some(b_left);
     }
+
+    Ok(())
 }

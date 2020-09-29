@@ -3,7 +3,9 @@ use crate::{
     SliceRefMut,
 };
 use core::any::Any;
-use std::{any::TypeId, borrow::Cow, ops::Deref};
+use std::{any::TypeId, ops::Deref};
+
+pub type ErrorDesc = Box<dyn std::error::Error>;
 
 pub trait Column<V> {
     fn col(&self) -> &V;
@@ -156,29 +158,33 @@ pub struct ColumnWrapper<'a> {
 }
 
 impl<'a> ColumnWrapper<'a> {
-    pub(crate) fn copy_inner_as_ref<'b>(&'b self) -> ColumnWrapper<'b>
+    pub(crate) fn copy_inner_as_ref<'b>(&'b self) -> Result<ColumnWrapper<'b>, ErrorDesc>
     where
         'a: 'b,
     {
         let col = match &self.column {
-            ColumnData::Ref(col) => *col,
-            ColumnData::RefMut(col) => &(**col),
-            ColumnData::Owned(col) => &(*col),
-            _ => panic!(),
+            ColumnData::Ref(col) => Some(*col),
+            ColumnData::RefMut(col) => Some(&(**col)),
+            ColumnData::Owned(col) => Some(&(**col)),
+            _ => None,
         };
 
-        let bitmap = match self.bitmap() {
-            None => BitmapData::Owned(None),
-            Some(s) => BitmapData::SliceRef(s),
-        };
+        if let Some(col) = col {
+            let bitmap = match self.bitmap() {
+                None => BitmapData::Owned(None),
+                Some(s) => BitmapData::SliceRef(s),
+            };
 
-        ColumnWrapper {
-            column: ColumnData::Ref(col),
-            index: IndexData::Owned(None),
-            bitmap,
-            typeid: self.typeid,
-            typename: self.typename.clone(),
-            name: None,
+            Ok(ColumnWrapper {
+                column: ColumnData::Ref(col),
+                index: IndexData::Owned(None),
+                bitmap,
+                typeid: self.typeid,
+                typename: self.typename.clone(),
+                name: None,
+            })
+        } else {
+            Err("Only Ref, RefMut and Owned variants of ColumnData support representing the inner data as a reference")?
         }
     }
 
@@ -355,7 +361,7 @@ impl<'a> ColumnWrapper<'a> {
         self.bitmap.to_vec_mut()
     }
 
-    pub fn unwrap<V>(self) -> V
+    pub fn unwrap<V>(self) -> Result<V, ErrorDesc>
     where
         V: Send + Sync + 'static,
     {
@@ -364,115 +370,139 @@ impl<'a> ColumnWrapper<'a> {
         match col {
             ColumnData::Owned(col) => {
                 let col = col as Box<dyn Any>;
-                let col = col.downcast::<V>().unwrap_or_else(|_| {
-                    panic!(
+                let col = col.downcast::<V>().map_err(|_| {
+                    format!(
                         "Downcast failed. Source type is {}, target type is {}",
                         typename,
                         std::any::type_name::<V>()
                     )
-                });
+                })?;
+
                 let col = copy_of_into_boxed_slice(col);
                 let mut res: Vec<V> = col.into();
+                //Should never fail
                 let res = res.pop().unwrap();
-                res
+                Ok(res)
             }
-            _ => panic!("Cannot downcast a non-owned column to owned column"),
+            _ => Err("Cannot downcast a non-owned column to owned column")?,
         }
     }
 
-    pub fn downcast_mut<V>(&mut self) -> &mut V
+    pub fn downcast_mut<V>(&mut self) -> Result<&mut V, ErrorDesc>
     where
         V: 'static,
     {
         let (typename, col) = (&self.typename, &mut self.column);
         let col_mut_ref = match col {
-            ColumnData::RefMut(col) => &mut **col,
-            ColumnData::Owned(col) => &mut **col,
-            _ => panic!("Cannot downcast a non-owned or non-ref mut column to ref mut column"),
+            ColumnData::RefMut(col) => Some(&mut **col),
+            ColumnData::Owned(col) => Some(&mut **col),
+            _ => None,
         };
-
-        col_mut_ref.downcast_mut::<V>().unwrap_or_else(|| {
-            panic!(
-                "Downcast failed. Source type is {}, target type is {}",
-                typename,
-                std::any::type_name::<V>()
-            )
-        })
+        if let Some(col_mut_ref) = col_mut_ref {
+            let col = col_mut_ref.downcast_mut::<V>();
+            if let Some(col) = col {
+                Ok(col)
+            } else {
+                Err(format!(
+                    "Downcast failed. Source type is {}, target type is {}",
+                    typename,
+                    std::any::type_name::<V>()
+                ))?
+            }
+        } else {
+            Err("Cannot downcast a non-owned or non-ref mut column to ref mut column")?
+        }
     }
 
-    pub fn downcast_ref<V>(&self) -> &V
+    pub fn downcast_ref<V>(&self) -> Result<&V, ErrorDesc>
     where
         V: 'static,
     {
         let (typename, col) = (&self.typename, &self.column);
         let col_ref = match col {
-            ColumnData::Ref(col) => &(**col),
-            ColumnData::RefMut(col) => &(**col),
-            ColumnData::Owned(col) => &(**col),
-            _=>panic!("downcast_ref can only be used with Ref, RefMut, and Owned variants of ColumnWrapper")
+            ColumnData::Ref(col) => Some(&(**col)),
+            ColumnData::RefMut(col) => Some(&(**col)),
+            ColumnData::Owned(col) => Some(&(**col)),
+            _ => None,
         };
 
-        col_ref.downcast_ref::<V>().unwrap_or_else(|| {
-            panic!(
-                "Downcast failed. Source type is {}, target type is {}",
-                typename,
-                std::any::type_name::<V>()
-            )
-        })
+        if let Some(col_ref) = col_ref {
+            if let Some(col) = col_ref.downcast_ref::<V>() {
+                Ok(col)
+            } else {
+                Err(format!(
+                    "Downcast failed. Source type is {}, target type is {}",
+                    typename,
+                    std::any::type_name::<V>()
+                ))?
+            }
+        } else {
+            Err("downcast_ref can only be used with Ref, RefMut, and Owned variants of ColumnWrapper")?
+        }
     }
 
     pub fn downcast_slice_ref<V: SliceMarker<V> + ?Sized>(
         &self,
-    ) -> &[<V as SliceMarker<V>>::Element]
+    ) -> Result<&[<V as SliceMarker<V>>::Element], ErrorDesc>
     where
         <V as SliceMarker<V>>::Element: 'static + Sync,
     {
         let (typename, col) = (&self.typename, &self.column);
         let col_ref_downcasted = match col {
-            ColumnData::SliceRef(col) => col.downcast_ref::<V>(),
-            ColumnData::SliceRefMut(col) => col.downcast_ref::<V>(),
-            _=>panic!("downcast_slice_ref can only be used with SliceRef and SliceRefMut variants of ColumnWrapper")
+            ColumnData::SliceRef(col) => Some(col.downcast_ref::<V>()),
+            ColumnData::SliceRefMut(col) => Some(col.downcast_ref::<V>()),
+            _ => None,
         };
 
-        col_ref_downcasted.unwrap_or_else(|| {
-            panic!(
-                "Slice downcast failed. Source type is {}, target type is {}",
-                typename,
-                std::any::type_name::<[<V as SliceMarker<V>>::Element]>()
-            )
-        })
+        if let Some(col_ref_downcasted) = col_ref_downcasted {
+            if let Some(col) = col_ref_downcasted {
+                Ok(col)
+            } else {
+                Err(format!(
+                    "Slice downcast failed. Source type is {}, target type is {}",
+                    typename,
+                    std::any::type_name::<[<V as SliceMarker<V>>::Element]>()
+                ))?
+            }
+        } else {
+            Err("downcast_slice_ref can only be used with SliceRef and SliceRefMut variants of ColumnWrapper")?
+        }
     }
 
     pub fn downcast_slice_mut<V: SliceMarker<V> + ?Sized>(
         &mut self,
-    ) -> &mut [<V as SliceMarker<V>>::Element]
+    ) -> Result<&mut [<V as SliceMarker<V>>::Element], ErrorDesc>
     where
         <V as SliceMarker<V>>::Element: 'static + Sync,
     {
         let (typename, col) = (&mut self.typename, &mut self.column);
-        let col_ref_downcasted = match col {
-            ColumnData::SliceRefMut(col) => col.downcast_mut::<V>(),
-            _ => panic!(
-                "downcast_slice_mut can only be used withSliceRefMut variant of ColumnWrapper"
-            ),
-        };
 
-        col_ref_downcasted.unwrap_or_else(|| {
-            panic!(
-                "Slice downcast failed. Source type is {}, target type is {}",
-                typename,
-                std::any::type_name::<[<V as SliceMarker<V>>::Element]>()
-            )
-        })
+        if let ColumnData::SliceRefMut(col) = col {
+            let col_ref_downcasted = col.downcast_mut::<V>();
+            if let Some(col) = col_ref_downcasted {
+                Ok(col)
+            } else {
+                Err(format!(
+                    "Slice downcast failed. Source type is {}, target type is {}",
+                    typename,
+                    std::any::type_name::<[<V as SliceMarker<V>>::Element]>()
+                ))?
+            }
+        } else {
+            Err("downcast_slice_mut can only be used withSliceRefMut variant of ColumnWrapper")?
+        }
     }
 
     pub fn slice_all_mut<V: SliceMarker<V> + ?Sized>(
         &mut self,
-    ) -> (
-        &mut [<V as SliceMarker<V>>::Element],
-        &mut Option<Vec<usize>>,
-        &mut Option<Bitmap>,
-    )
+    ) -> Result<
+        (
+            &mut [<V as SliceMarker<V>>::Element],
+            &mut Option<Vec<usize>>,
+            &mut Option<Bitmap>,
+        ),
+        ErrorDesc,
+    >
     where
         <V as SliceMarker<V>>::Element: 'static + Sync,
     {
@@ -484,22 +514,25 @@ impl<'a> ColumnWrapper<'a> {
             &self.typeid,
         );
 
-        let col_ref_downcasted = match col {
-            ColumnData::SliceRefMut(col) => col.downcast_mut::<V>(),
-            _=>panic!("downcast_slice_ref can only be used with SliceRef and SliceRefMut variants of ColumnWrapper")
-        };
-
-        let col = col_ref_downcasted.unwrap_or_else(|| {
-            panic!(
-                "Slice downcast failed. Source type is {}, target type is {}",
-                typename,
-                std::any::type_name::<[<V as SliceMarker<V>>::Element]>(),
-            )
-        });
-        (col, ind.to_vec_mut(), bmap.to_vec_mut())
+        if let ColumnData::SliceRefMut(col) = col {
+            let col_ref_downcasted = col.downcast_mut::<V>();
+            if let Some(col) = col_ref_downcasted {
+                Ok((col, ind.to_vec_mut(), bmap.to_vec_mut()))
+            } else {
+                Err(format!(
+                    "Slice downcast failed. Source type is {}, target type is {}",
+                    typename,
+                    std::any::type_name::<[<V as SliceMarker<V>>::Element]>(),
+                ))?
+            }
+        } else {
+            Err("downcast_slice_ref can only be used with SliceRef and SliceRefMut variants of ColumnWrapper".to_string())?
+        }
     }
 
-    pub fn all_mut<V>(&mut self) -> (&mut V, &mut Option<Vec<usize>>, &mut Option<Bitmap>)
+    pub fn all_mut<V>(
+        &mut self,
+    ) -> Result<(&mut V, &mut Option<Vec<usize>>, &mut Option<Bitmap>), ErrorDesc>
     where
         V: 'static,
     {
@@ -511,24 +544,34 @@ impl<'a> ColumnWrapper<'a> {
             &self.typeid,
         );
 
-        let col_mut_ref = match col {
-            ColumnData::RefMut(col) => &mut (**col),
-            ColumnData::Owned(col) => &mut (**col),
-
-            _ => panic!("Cannot downcast a non-owned or non-ref mut column to ref mut column"),
-        };
-
-        let col = col_mut_ref.downcast_mut::<V>().unwrap_or_else(|| {
-            panic!(
-                "Downcast failed. Source type is {}, target type is {}",
-                typename,
-                std::any::type_name::<V>(),
-            )
-        });
-        (col, ind.to_vec_mut(), bmap.to_vec_mut())
+        match col {
+            ColumnData::RefMut(col) => {
+                let col_mut_ref = (&mut (**col)).downcast_mut::<V>();
+                match col_mut_ref {
+                    Some(col) => Ok((col, ind.to_vec_mut(), bmap.to_vec_mut())),
+                    None => Err(format!(
+                        "Downcast failed. Source type is {}, target type is {}",
+                        typename,
+                        std::any::type_name::<V>(),
+                    ))?,
+                }
+            }
+            ColumnData::Owned(col) => {
+                let col_mut_ref = (&mut (**col)).downcast_mut::<V>();
+                match col_mut_ref {
+                    Some(col) => Ok((col, ind.to_vec_mut(), bmap.to_vec_mut())),
+                    None => Err(format!(
+                        "Downcast failed. Source type is {}, target type is {}",
+                        typename,
+                        std::any::type_name::<V>(),
+                    ))?,
+                }
+            }
+            _ => Err("Cannot downcast a non-owned or non-ref mut column to ref mut column")?,
+        }
     }
 
-    pub fn all_unwrap<V>(self) -> (V, Option<Vec<usize>>, Option<Bitmap>)
+    pub fn all_unwrap<V>(self) -> Result<(V, Option<Vec<usize>>, Option<Bitmap>), ErrorDesc>
     where
         V: 'static,
     {
@@ -537,19 +580,21 @@ impl<'a> ColumnWrapper<'a> {
         match col {
             ColumnData::Owned(col) => {
                 let col = col as Box<dyn Any>;
-                let col = col.downcast::<V>().unwrap_or_else(|_| {
-                    panic!(
+                let col = col.downcast::<V>().map_err(|_| {
+                    format!(
                         "Downcast failed. Source type is {}, target type is {}",
                         typename,
                         std::any::type_name::<V>()
                     )
-                });
+                })?;
+
                 let col = copy_of_into_boxed_slice(col);
                 let mut res: Vec<V> = col.into();
+                //Should never fail
                 let res = res.pop().unwrap();
-                (res, ind.into_owned(), bmap.into_owned())
+                Ok((res, ind.into_owned(), bmap.into_owned()))
             }
-            _ => panic!("Cannot downcast a non-owned column to owned column"),
+            _ => Err("Cannot downcast a non-owned column to owned column")?,
         }
     }
 
@@ -585,12 +630,19 @@ impl<'a> ColumnWrapper<'a> {
     ///let len_orig = col4.len();
     ///let mut col4 = ColumnWrapper::new(col4);
     ///let len_data = col4.len_data(&dict);
-    ///assert_eq!(len_orig, len_data);
+    ///assert_eq!(len_orig, len_data.unwrap());
     ///```
-    pub fn len_data(&self, dict: &Dictionary) -> usize {
+    pub fn len_data(&self, dict: &Dictionary) -> Result<usize, ErrorDesc> {
         let signature = Signature::new("len", vec![self.typeid], vec![self.typename.clone()]);
-        let len_data = dict.len_data.get(&signature).unwrap();
-        len_data(&self)
+        let len_data = dict.len_data.get(&signature);
+        if let Some(len_data) = len_data {
+            len_data(&self)
+        } else {
+            Err(format!(
+                "Following operation not found in dictionary: {:?}",
+                signature
+            ))?
+        }
     }
     ///Returns the internal length of the data stored in the column,
     ///taking into consideration the index
@@ -601,45 +653,78 @@ impl<'a> ColumnWrapper<'a> {
     ///
     ///let mut col4 = ColumnWrapper::new(col4).with_index(Some(vec![0,0,1]));
     ///let len_data = col4.len(&dict);
-    ///assert_eq!(3, len_data);
+    ///assert_eq!(3, len_data.unwrap());
     ///```
-    pub fn len(&self, dict: &Dictionary) -> usize {
+    pub fn len(&self, dict: &Dictionary) -> Result<usize, ErrorDesc> {
         match self.index() {
-            Some(ind) => ind.len(),
+            Some(ind) => Ok(ind.len()),
             None => self.len_data(dict),
         }
     }
 
-    pub fn part(&self, chunk_size: usize, dict: &Dictionary) -> Vec<ColumnWrapper> {
+    pub fn part(
+        &self,
+        chunk_size: usize,
+        dict: &Dictionary,
+    ) -> Result<Vec<ColumnWrapper>, ErrorDesc> {
         let signature = Signature::new("part", vec![self.typeid], vec![self.typename.clone()]);
-        let op = dict.part.get(&signature).unwrap();
-        op.part(&self, chunk_size)
+        if let Some(op) = dict.part.get(&signature) {
+            op.part(self, chunk_size)
+        } else {
+            Err(format!(
+                "Following operation not found in dictionary: {:?}",
+                signature
+            ))?
+        }
     }
 
-    pub fn part_mut(&mut self, chunk_size: usize, dict: &Dictionary) -> Vec<ColumnWrapper> {
+    pub fn part_mut(
+        &mut self,
+        chunk_size: usize,
+        dict: &Dictionary,
+    ) -> Result<Vec<ColumnWrapper>, ErrorDesc> {
         let signature = Signature::new("part", vec![self.typeid], vec![self.typename.clone()]);
-        let op = dict.part.get(&signature).unwrap();
-        op.part_mut(self, chunk_size)
+
+        if let Some(op) = dict.part.get(&signature) {
+            op.part_mut(self, chunk_size)
+        } else {
+            Err(format!(
+                "Following operation not found in dictionary: {:?}",
+                signature
+            ))?
+        }
     }
 
     pub fn part_with_sizes(
         &self,
         chunks_size: &Vec<usize>,
         dict: &Dictionary,
-    ) -> Vec<ColumnWrapper> {
+    ) -> Result<Vec<ColumnWrapper>, ErrorDesc> {
         let signature = Signature::new("part", vec![self.typeid], vec![self.typename.clone()]);
-        let op = dict.part.get(&signature).unwrap();
-        op.part_with_sizes(self, &chunks_size)
+        if let Some(op) = dict.part.get(&signature) {
+            op.part_with_sizes(self, &chunks_size)
+        } else {
+            Err(format!(
+                "Following operation not found in dictionary: {:?}",
+                signature
+            ))?
+        }
     }
 
     pub fn part_with_sizes_mut(
         &mut self,
         chunks_size: &Vec<usize>,
         dict: &Dictionary,
-    ) -> Vec<ColumnWrapper> {
+    ) -> Result<Vec<ColumnWrapper>, ErrorDesc> {
         let signature = Signature::new("part", vec![self.typeid], vec![self.typename.clone()]);
-        let op = dict.part.get(&signature).unwrap();
-        op.part_with_sizes_mut(self, &chunks_size)
+        if let Some(op) = dict.part.get(&signature) {
+            op.part_with_sizes_mut(self, &chunks_size)
+        } else {
+            Err(format!(
+                "Following operation not found in dictionary: {:?}",
+                signature
+            ))?
+        }
     }
 }
 

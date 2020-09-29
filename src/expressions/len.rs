@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use paste::paste;
 
-pub type LenOperation = fn(&ColumnWrapper) -> usize;
+pub type LenOperation = fn(&ColumnWrapper) -> Result<usize, ErrorDesc>;
 
 pub type LenDictionary = HashMap<Signature, LenOperation>;
 
@@ -31,19 +31,19 @@ macro_rules! binary_operation_load {
 macro_rules! binary_operation_impl {
     ($($tr:ty)+) => ($(
         paste!{
-            fn [<new_vec $tr>](c: &ColumnWrapper)->usize
+            fn [<new_vec $tr>](c: &ColumnWrapper)->Result<usize,ErrorDesc>
             {
                 type T=$tr;
                 type V=Vec<T>;
-                c.downcast_ref::<V>().len()
+                c.downcast_ref::<V>().map(|v| v.len())
             }
         }
         paste!{
-            fn [<new_slice $tr>](c: &ColumnWrapper)->usize
+            fn [<new_slice $tr>](c: &ColumnWrapper)->Result<usize,ErrorDesc>
             {
                 type T=$tr;
                 type V=[T];
-                c.downcast_slice_ref::<V>().len()
+                c.downcast_slice_ref::<V>().map(|v| v.len())
             }
         }
     )+)

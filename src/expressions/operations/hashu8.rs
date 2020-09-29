@@ -17,7 +17,10 @@ pub(crate) fn load_op_dict(dict: &mut OpDictionary) {
     dict.insert(signature, op);
 }
 
-fn hashadd_vecu64_columnu8(output: &mut ColumnWrapper, input: Vec<InputTypes>) {
+fn hashadd_vecu64_columnu8(
+    output: &mut ColumnWrapper,
+    input: Vec<InputTypes>,
+) -> Result<(), ErrorDesc> {
     let rs = ahash::RandomState::with_seeds(1234, 5678);
 
     type T1 = u64;
@@ -28,15 +31,20 @@ fn hashadd_vecu64_columnu8(output: &mut ColumnWrapper, input: Vec<InputTypes>) {
     //right[0]-->input
     //if right[0] and right[1]-> input_lhs, input_rhs
 
-    let (data_output, index_output, bitmap_output) = output.all_mut::<Vec<T1>>();
+    let (data_output, index_output, bitmap_output) = output.all_mut::<Vec<T1>>()?;
 
     let (datau8_input, index_input, bitmap_input) = match &input[0] {
-        InputTypes::Ref(a) => (a.downcast_ref::<T2>(), a.index(), a.bitmap()),
-        InputTypes::Owned(a) => (a.downcast_ref::<T2>(), a.index(), a.bitmap()),
+        InputTypes::Ref(a) => (a.downcast_ref::<T2>()?, a.index(), a.bitmap()),
+        InputTypes::Owned(a) => (a.downcast_ref::<T2>()?, a.index(), a.bitmap()),
     };
 
     //The output column should have no index
-    assert_eq!(index_output, &None);
+    if let Some(_) = index_output {
+        Err(format!(
+            "The output column for operation {} can't have an index",
+            OP
+        ))?
+    };
 
     let len_output = data_output.len();
     let len_input = if let Some(ind) = index_input {
@@ -45,7 +53,13 @@ fn hashadd_vecu64_columnu8(output: &mut ColumnWrapper, input: Vec<InputTypes>) {
         datau8_input.len.len()
     };
 
-    assert_eq!(len_output, len_input);
+    //The input and output columns should have the same length
+    if len_output != len_input {
+        Err(format!(
+             "The input and output columns should have the same length, but they are {} and {} respectively",
+             len_input, len_output
+        ))?
+    };
 
     let slice_len = &datau8_input.len;
     let slice_start_pos = &datau8_input.start_pos;
@@ -140,4 +154,5 @@ fn hashadd_vecu64_columnu8(output: &mut ColumnWrapper, input: Vec<InputTypes>) {
         };
         *bitmap_output = Some(b_left);
     }
+    Ok(())
 }

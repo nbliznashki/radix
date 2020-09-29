@@ -1,6 +1,6 @@
 use std::ops::{Deref, DerefMut};
 
-use crate::{ColumnWrapper, HashColumn, OpDictionary};
+use crate::HashColumn;
 
 pub struct HashColumnPartitioned<'a> {
     data: Vec<HashColumn<'a>>,
