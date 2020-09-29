@@ -83,7 +83,7 @@ pub trait ColumnPartition<V, T> {
             };
         }
 
-        HashColumn::new(data_hash, bitmap_hash)
+        HashColumn::new(data_hash).with_bitmap(bitmap_hash)
     }
     fn hash_column_append<S>(
         &self,
@@ -171,7 +171,7 @@ pub trait ColumnPartition<V, T> {
 
         if let Some(mut bitmap_hash) = bitmap_hash {
             if let Some(bitmap_current) = &h.bitmap() {
-                bitmap_hash &= &bitmap_current;
+                bitmap_hash &= &Bitmap::from(bitmap_current.to_vec());
             };
 
             *h.bitmap_mut() = Some(bitmap_hash);

@@ -17,7 +17,10 @@ pub(crate) fn load_op_dict(dict: &mut OpDictionary) {
     dict.insert(signature, op);
 }
 
-fn hashadd_vecu64_columnu8(output: &mut ColumnWrapper, input: Vec<InputTypes>) {
+fn hashadd_vecu64_columnu8(
+    output: &mut ColumnWrapper,
+    input: Vec<InputTypes>,
+) -> Result<(), ErrorDesc> {
     let rs = ahash::RandomState::with_seeds(1234, 5678);
 
     type T1 = u64;
@@ -28,23 +31,20 @@ fn hashadd_vecu64_columnu8(output: &mut ColumnWrapper, input: Vec<InputTypes>) {
     //right[0]-->input
     //if right[0] and right[1]-> input_lhs, input_rhs
 
-    let (data_output, index_output, bitmap_output) = output.all_mut::<Vec<T1>>();
+    let (data_output, index_output, bitmap_output) = output.all_mut::<Vec<T1>>()?;
 
     let (datau8_input, index_input, bitmap_input) = match &input[0] {
-        InputTypes::Ref(a) => (
-            a.downcast_ref::<T2>(),
-            a.index().as_ref(),
-            a.bitmap().as_ref(),
-        ),
-        InputTypes::Owned(a) => (
-            a.downcast_ref::<T2>(),
-            a.index().as_ref(),
-            a.bitmap().as_ref(),
-        ),
+        InputTypes::Ref(a) => (a.downcast_ref::<T2>()?, a.index(), a.bitmap()),
+        InputTypes::Owned(a) => (a.downcast_ref::<T2>()?, a.index(), a.bitmap()),
     };
 
     //The output column should have no index
-    assert_eq!(index_output, &None);
+    if let Some(_) = index_output {
+        Err(format!(
+            "The output column for operation {} can't have an index",
+            OP
+        ))?
+    };
 
     let len_output = data_output.len();
     let len_input = if let Some(ind) = index_input {
@@ -53,7 +53,13 @@ fn hashadd_vecu64_columnu8(output: &mut ColumnWrapper, input: Vec<InputTypes>) {
         datau8_input.len.len()
     };
 
-    assert_eq!(len_output, len_input);
+    //The input and output columns should have the same length
+    if len_output != len_input {
+        Err(format!(
+             "The input and output columns should have the same length, but they are {} and {} respectively",
+             len_input, len_output
+        ))?
+    };
 
     let slice_len = &datau8_input.len;
     let slice_start_pos = &datau8_input.start_pos;
@@ -79,7 +85,7 @@ fn hashadd_vecu64_columnu8(output: &mut ColumnWrapper, input: Vec<InputTypes>) {
                 ind.iter()
                     .map(|i| &data[slice_start_pos[*i]..slice_start_pos[*i] + slice_len[*i]]),
             )
-            .zip(b_right.bits.iter())
+            .zip(b_right.iter())
             .for_each(|((l, sliceu8), b_r)| {
                 l.add_assign(if *b_r != 0 {
                     {
@@ -109,7 +115,7 @@ fn hashadd_vecu64_columnu8(output: &mut ColumnWrapper, input: Vec<InputTypes>) {
             .iter_mut()
             .zip(slice_start_pos.iter())
             .zip(slice_len.iter())
-            .zip(b_right.bits.iter())
+            .zip(b_right.iter())
             .for_each(|(((l, slice_start), len), b_r)| {
                 l.add_assign(if *b_r != 0 {
                     {
@@ -126,9 +132,9 @@ fn hashadd_vecu64_columnu8(output: &mut ColumnWrapper, input: Vec<InputTypes>) {
     if bitmap_output.is_none() {
         *bitmap_output = match (index_input, bitmap_input) {
             (_, None) => None,
-            (None, Some(b_right)) => Some((*b_right).clone()),
+            (None, Some(b_right)) => Some(Bitmap::from(b_right.to_vec())),
             (Some(ind), Some(b_right)) => Some(Bitmap {
-                bits: ind.iter().map(|i| b_right.bits[*i]).collect(),
+                bits: ind.iter().map(|i| b_right[*i]).collect(),
             }),
         };
     } else {
@@ -138,14 +144,15 @@ fn hashadd_vecu64_columnu8(output: &mut ColumnWrapper, input: Vec<InputTypes>) {
             (None, Some(b_right)) => b_left
                 .bits
                 .iter_mut()
-                .zip(b_right.bits.iter())
+                .zip(b_right.iter())
                 .for_each(|(b_l, b_r)| *b_l &= b_r),
             (Some(ind), Some(b_right)) => b_left
                 .bits
                 .iter_mut()
                 .zip(ind.iter())
-                .for_each(|(b_l, i)| *b_l &= b_right.bits[*i]),
+                .for_each(|(b_l, i)| *b_l &= b_right[*i]),
         };
         *bitmap_output = Some(b_left);
     }
+    Ok(())
 }

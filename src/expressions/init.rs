@@ -26,7 +26,7 @@ macro_rules! binary_operation_impl {
 
             #[allow(dead_code)]
             fn [<new_vec $tr>]()->ColumnWrapper<'static> {
-                ColumnWrapper::new(Vec::<$tr>::new(), None, None)
+                ColumnWrapper::new(Vec::<$tr>::new())
             }
 
         }

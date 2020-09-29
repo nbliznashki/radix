@@ -21,6 +21,10 @@ impl Bitmap {
         Bitmap { bits: v }
     }
 
+    pub fn from(v: Vec<u8>) -> Self {
+        Bitmap { bits: v }
+    }
+
     pub fn len(&self) -> usize {
         self.bits.len()
     }

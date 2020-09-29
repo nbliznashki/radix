@@ -1,4 +1,4 @@
-use crate::expressions::opdictionary::OpDictionary;
+use super::op::*;
 
 pub mod addassign;
 pub mod addinit;

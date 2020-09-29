@@ -3,7 +3,6 @@ use paste::paste;
 
 use crate::*;
 
-#[allow(dead_code)]
 const OP: &str = ">=";
 
 macro_rules! operation_load {
@@ -21,8 +20,7 @@ macro_rules! operation_load {
 macro_rules! operation_impl {
     ($(($tl:ty, $tr:ty))+) => ($(
         paste! {
-            #[allow(dead_code)]
-            fn [<ge_vec $tl:lower _ vec $tr:lower>](output: &mut ColumnWrapper, input: Vec<InputTypes>) {
+            fn [<ge_vec $tl:lower _ vec $tr:lower>](output: &mut ColumnWrapper, input: Vec<InputTypes>)->Result<(),ErrorDesc> {
 
                 type T1=$tl;
                 type T2=$tr;
@@ -32,16 +30,16 @@ macro_rules! operation_impl {
                 //right[0]-->input
                 //if right[0] and right[1]-> input_lhs, input_rhs
 
-                let (data_output, index_output, bitmap_output) = output.all_mut::<Vec<bool>>();
+                let (data_output, index_output, bitmap_output) = output.all_mut::<Vec<bool>>()?;
 
                 let (data_input_lhs, index_input_lhs, bitmap_input_lhs) = match &input[0] {
-                    InputTypes::Ref(a)=>(a.downcast_ref::<Vec<T1>>(), a.index().as_ref(), a.bitmap().as_ref()),
-                    InputTypes::Owned(a)=>(a.downcast_ref::<Vec<T1>>(), a.index().as_ref(), a.bitmap().as_ref())
+                    InputTypes::Ref(a)=>(a.downcast_ref::<Vec<T1>>()?, a.index(), a.bitmap()),
+                    InputTypes::Owned(a)=>(a.downcast_ref::<Vec<T1>>()?, a.index(), a.bitmap())
                 };
 
                 let (data_input_rhs, index_input_rhs, bitmap_input_rhs) = match &input[1] {
-                    InputTypes::Ref(a)=>(a.downcast_ref::<Vec<T2>>(), a.index().as_ref(), a.bitmap().as_ref()),
-                    InputTypes::Owned(a)=>(a.downcast_ref::<Vec<T2>>(), a.index().as_ref(), a.bitmap().as_ref())
+                    InputTypes::Ref(a)=>(a.downcast_ref::<Vec<T2>>()?, a.index(), a.bitmap()),
+                    InputTypes::Owned(a)=>(a.downcast_ref::<Vec<T2>>()?, a.index(), a.bitmap())
                 };
 
 
@@ -57,7 +55,13 @@ macro_rules! operation_impl {
                     data_input_lhs.len()
                 };
 
-                assert_eq!(len_input_rhs, len_input_lhs);
+                //The two input columns should have the same length
+                if len_input_rhs != len_input_lhs {
+                    Err(format!(
+                        "The two input columns should have the same length, but they are {} and {} respectively",
+                        len_input_lhs, len_input_rhs
+                    ))?
+                };
 
                 //Clean up
                 data_output.truncate(0);
@@ -72,25 +76,25 @@ macro_rules! operation_impl {
 
                     if let Some(bitm_lhs)=&bitmap_input_lhs{
                         if let Some(ind_lhs)=&index_input_lhs{
-                            v.extend(ind_lhs.iter().map(|i| bitm_lhs.bits[*i]))
+                            v.extend(ind_lhs.iter().map(|i| bitm_lhs[*i]))
                         } else {
-                            v.extend(bitm_lhs.bits.iter())
+                            v.extend(bitm_lhs.iter())
                         }
                     };
                     if v.len()==0 {
                         if let Some(bitm_rhs)=&bitmap_input_rhs{
                             if let Some(ind_rhs)=&index_input_rhs{
-                              v.extend(ind_rhs.iter().map(|i| bitm_rhs.bits[*i]))
+                              v.extend(ind_rhs.iter().map(|i| bitm_rhs[*i]))
                             } else {
-                              v.extend(bitm_rhs.bits.iter())
+                              v.extend(bitm_rhs.iter())
                             }
                         };
                     } else {
                         if let Some(bitm_rhs)=&bitmap_input_rhs{
                             if let Some(ind_rhs)=&index_input_rhs{
-                              v.iter_mut().zip(ind_rhs.iter()).for_each(|(b,i)| *b&=bitm_rhs.bits[*i])
+                              v.iter_mut().zip(ind_rhs.iter()).for_each(|(b,i)| *b&=bitm_rhs[*i])
                             } else {
-                                v.iter_mut().zip(bitm_rhs.bits.iter()).for_each(|(b,bl)| *b&=*bl)
+                                v.iter_mut().zip(bitm_rhs.iter()).for_each(|(b,bl)| *b&=*bl)
                             }
                         };
                     }
@@ -181,6 +185,8 @@ macro_rules! operation_impl {
                 if let Some(bits)=bits_new{
                     *bitmap_output=Some(Bitmap{bits})
                 };
+
+                Ok(())
 
 
             }

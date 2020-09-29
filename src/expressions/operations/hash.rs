@@ -29,7 +29,7 @@ macro_rules! binary_operation_impl {
     ($($tr:ty)+) => ($(
             #[allow(dead_code)]
             paste!{
-                fn [<hashadd_vecu64_vec_ $tr:lower>](output: &mut ColumnWrapper, input: Vec<InputTypes>) {
+                fn [<hashadd_vecu64_vec_ $tr:lower>](output: &mut ColumnWrapper, input: Vec<InputTypes>)->Result<(),ErrorDesc>{
 
                 let rs=ahash::RandomState::with_seeds(1234,5678);
 
@@ -41,17 +41,22 @@ macro_rules! binary_operation_impl {
                 //right[0]-->input
                 //if right[0] and right[1]-> input_lhs, input_rhs
 
-                let (data_output, index_output, bitmap_output) = output.all_mut::<HashData>();
+                let (data_output, index_output, bitmap_output) = output.all_mut::<HashData>()?;
 
                 let (data_input, index_input, bitmap_input) = match &input[0] {
-                    InputTypes::Ref(a)=>(a.downcast_ref::<Vec<T2>>(), a.index().as_ref(), a.bitmap().as_ref()),
-                    InputTypes::Owned(a)=>(a.downcast_ref::<Vec<T2>>(), a.index().as_ref(), a.bitmap().as_ref())
+                    InputTypes::Ref(a)=>(a.downcast_ref::<Vec<T2>>()?, a.index(), a.bitmap()),
+                    InputTypes::Owned(a)=>(a.downcast_ref::<Vec<T2>>()?, a.index(), a.bitmap())
                 };
 
 
 
                 //The output column should have no index
-                assert_eq!(index_output, &None);
+                if let Some(_) = index_output {
+                    Err(format!(
+                        "The output column for operation {} can't have an index",
+                        OP
+                    ))?
+                };
 
 
                 let len_output = data_output.len();
@@ -61,7 +66,13 @@ macro_rules! binary_operation_impl {
                     data_input.len()
                 };
 
-                assert_eq!(len_output, len_input);
+                //The input and output columns should have the same length
+                if len_output != len_input {
+                    Err(format!(
+                        "The input and output columns should have the same length, but they are {} and {} respectively",
+                        len_input, len_output
+                    ))?
+                };
 
                 match (&index_input, &bitmap_input) {
                     (Some(ind), None) => data_output
@@ -71,7 +82,7 @@ macro_rules! binary_operation_impl {
                     (Some(ind), Some(b_right)) => data_output
                         .iter_mut()
                         .zip(ind.iter().map(|i| &data_input[*i]))
-                        .zip(b_right.bits.iter())
+                        .zip(b_right.iter())
                         .for_each(|((l, r), b_r)| {
                             l.add_assign(if *b_r != 0 {
                                 {let mut h=rs.build_hasher(); r.hash(&mut h); h.finish()}
@@ -88,7 +99,7 @@ macro_rules! binary_operation_impl {
                     (None, Some(b_right)) => data_output
                         .iter_mut()
                         .zip(data_input.iter())
-                        .zip(b_right.bits.iter())
+                        .zip(b_right.iter())
                         .for_each(|((l, r), b_r)| {
                             l.add_assign(if *b_r != 0 {
                                 {let mut h=rs.build_hasher(); r.hash(&mut h); h.finish()}
@@ -100,9 +111,9 @@ macro_rules! binary_operation_impl {
                 if bitmap_output.is_none() {
                     *bitmap_output = match (index_input, bitmap_input) {
                         (_, None) => None,
-                        (None, Some(b_right)) => Some((*b_right).clone()),
+                        (None, Some(b_right)) => Some(Bitmap::from(b_right.to_vec())),
                         (Some(ind), Some(b_right)) => Some(Bitmap {
-                            bits: ind.iter().map(|i| b_right.bits[*i]).collect(),
+                            bits: ind.iter().map(|i| b_right[*i]).collect(),
                         }),
                     };
                 } else {
@@ -112,16 +123,17 @@ macro_rules! binary_operation_impl {
                         (None, Some(b_right)) => b_left
                             .bits
                             .iter_mut()
-                            .zip(b_right.bits.iter())
+                            .zip(b_right.iter())
                             .for_each(|(b_l, b_r)| *b_l &= b_r),
                         (Some(ind), Some(b_right)) => b_left
                             .bits
                             .iter_mut()
                             .zip(ind.iter())
-                            .for_each(|(b_l, i)| *b_l &= b_right.bits[*i]),
+                            .for_each(|(b_l, i)| *b_l &= b_right[*i]),
                     };
                     *bitmap_output = Some(b_left);
                 }
+                Ok(())
             }
 
     }

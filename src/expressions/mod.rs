@@ -1,7 +1,13 @@
-pub mod initdictionary;
-pub mod opdictionary;
+pub mod dictionary;
+pub mod init;
+pub mod len;
+pub mod op;
 pub mod operations;
+pub mod partition;
 
-pub use initdictionary::*;
-pub use opdictionary::*;
+pub use dictionary::*;
+pub use init::*;
+pub use len::*;
+pub use op::*;
 pub use operations::*;
+pub use partition::*;

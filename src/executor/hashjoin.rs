@@ -1,4 +1,4 @@
-use crate::{hashcolumn::*, InitDictionary, OpDictionary};
+use crate::{hashcolumn::*, Dictionary, ErrorDesc};
 use crate::{ColumnWrapper, Expression};
 
 use std::cmp::max;
@@ -25,7 +25,7 @@ pub fn build_ind(
         match left.bitmap() {
             Some(bmap) => {
                 left.iter()
-                    .zip(bmap.bits.iter())
+                    .zip(bmap.iter())
                     .enumerate()
                     .filter(|(_, (_value, b))| **b != 0)
                     .map(|(i, (value, _b))| (i + 1, value >> (num_bits_to_shift)))
@@ -56,7 +56,7 @@ pub fn build_ind(
                 Some(bmap) => {
                     right
                         .iter()
-                        .zip(bmap.bits.iter())
+                        .zip(bmap.iter())
                         .enumerate()
                         .filter(|(_, (_value, b))| **b != 0)
                         .map(|(i, (value, _b))| (i + 1, value, value >> (num_bits_to_shift)))
@@ -100,9 +100,8 @@ pub fn applyoneif<'a>(
     left_ind: &mut Vec<usize>,
     right_ind: &mut Vec<usize>,
     expr: &Expression,
-    dict: &OpDictionary,
-    init_dict: &InitDictionary,
-) {
+    dict: &Dictionary,
+) -> Result<(), ErrorDesc> {
     let left_ind_backup: Vec<_> = left_cols.iter_mut().map(|c| c.re_index(left_ind)).collect();
     let right_ind_backup: Vec<_> = right_cols
         .iter_mut()
@@ -112,21 +111,38 @@ pub fn applyoneif<'a>(
     let mut ref_columns: Vec<&ColumnWrapper> = left_cols.iter().map(|c| &(**c)).collect();
     ref_columns.extend(right_cols.iter().map(|c| &(**c)));
 
-    let mut owned_columns = expr.compile(&dict, &init_dict).1;
+    let mut owned_columns = expr.compile(&dict)?.1;
     expr.eval(
         &mut owned_columns.iter_mut().collect(),
         &ref_columns,
         &vec![],
         &dict,
-    );
+    )?;
 
-    assert!(!owned_columns.is_empty());
+    if owned_columns.is_empty() {
+        Err(format!(
+            "The expression doesn't have any output columns: {:?}",
+            expr
+        ))?
+    };
+
     let result = owned_columns.pop().unwrap();
 
-    let (b, bitmap, _) = result.all_unwrap::<Vec<bool>>();
+    let (b, bitmap, _) = result.all_unwrap::<Vec<bool>>()?;
 
-    assert_eq!(b.len(), left_ind.len());
-    assert_eq!(b.len(), right_ind.len());
+    if b.len() != left_ind.len() {
+        Err(format!(
+                    "The output of the boolean operation has length {} , but the join index (lhs) lenght is {} ",
+                    b.len(), left_ind.len()
+        ))?
+    };
+
+    if b.len() != right_ind.len() {
+        Err(format!(
+                    "The output of the boolean operation has length {} , but the join index (rhs) lenght is {} ",
+                    b.len(), right_ind.len()
+        ))?
+    };
 
     match bitmap {
         Some(bmap) => {
@@ -170,4 +186,5 @@ pub fn applyoneif<'a>(
         .iter_mut()
         .zip(right_ind_backup.into_iter())
         .for_each(|(c, ind)| *c.index_mut() = ind);
+    Ok(())
 }
