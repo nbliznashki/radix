@@ -755,7 +755,7 @@ mod tests {
         use rand::prelude::*;
         use rayon::prelude::*;
 
-        let data: Vec<u64> = (0..1000usize)
+        let data: Vec<u64> = (0..100_000usize)
             .into_par_iter()
             .map(|_| {
                 let mut s: Vec<u64> = thread_rng().sample_iter(&Standard).take(1).collect();
@@ -770,7 +770,7 @@ mod tests {
         let hash = data.hash_column(&None, &None, &s);
 
         let b = BucketColumn::from_hash(hash, 4);
-        let bmap = BucketsSizeMap::from_bucket_column(b, 2);
+        let bmap = BucketsSizeMap::from_bucket_column(b, 16);
 
         let part = data.partition_column(&None, &None, &bmap);
         let part_index = match &part {
@@ -793,8 +793,8 @@ mod tests {
             _ => panic!(),
         };
 
-        data_orig.sort();
-        data.sort();
+        data_orig.par_sort();
+        data.par_sort();
 
         assert_eq!(data_orig, data);
     }
