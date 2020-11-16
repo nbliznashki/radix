@@ -755,7 +755,7 @@ mod tests {
         use rand::prelude::*;
         use rayon::prelude::*;
 
-        let data: Vec<u64> = (0..100_000usize)
+        let data: Vec<u64> = (0..100_00usize)
             .into_par_iter()
             .map(|_| {
                 let mut s: Vec<u64> = thread_rng().sample_iter(&Standard).take(1).collect();
