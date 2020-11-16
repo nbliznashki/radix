@@ -648,12 +648,17 @@ impl<'a> ColumnWrapper<'a> {
     ///taking into consideration the index
     /// ```
     ///use radix::*;
-    ///let col4: Vec<u64> = vec![1, 5, 6, 4, 5, 6, 4, 5, 6, 8];
     ///let dict: Dictionary = Dictionary::new();
     ///
-    ///let mut col4 = ColumnWrapper::new(col4).with_index(Some(vec![0,0,1]));
+    ///let col4_data: Vec<u64> = vec![1, 5, 6, 4, 5, 6, 4, 5, 6, 8];
+    ///let mut col4 = ColumnWrapper::new(col4_data).with_index(Some(vec![0,0,1]));
     ///let len_data = col4.len(&dict);
     ///assert_eq!(3, len_data.unwrap());
+    ///
+    ///let col4_data: Vec<u64> = vec![1, 5, 6, 4, 5, 6, 4, 5, 6, 8];
+    ///let mut col4 = ColumnWrapper::new(col4_data).with_index(None);
+    ///let len_data = col4.len(&dict);
+    ///assert_eq!(10, len_data.unwrap());
     ///```
     pub fn len(&self, dict: &Dictionary) -> Result<usize, ErrorDesc> {
         match self.index() {
